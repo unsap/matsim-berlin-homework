@@ -26,6 +26,8 @@ public class ImplementCityWideSpeedLimit {
     }
 
     public static void main(String[] args) throws IOException {
+
+        // baut bool HashMap der network-nodes ob in Berlin
         GeometryFactory geometryFactory = new GeometryFactory();
         var shape = readBerlinShape(geometryFactory);
         var network = NetworkUtils.readNetwork(Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-v5.5-network.xml.gz").toString());
@@ -40,11 +42,12 @@ public class ImplementCityWideSpeedLimit {
 
         double speedLimit = 15 / 3.6;
 
+        // reduziert für alle bisher schnelleren links in Berlin außer motorways den freespeed auf unser speedLimit
         for (var link : network.getLinks().values()) {
             var fromNode = isBerlinByNode.get(link.getFromNode().getId());
             var toNode = isBerlinByNode.get(link.getToNode().getId());
             var type = link.getAttributes().getAttribute("type");
-            if ((fromNode || toNode) && !Objects.equals(type, "motorway") && link.getFreespeed() > speedLimit) {
+            if ((fromNode || toNode) && !Objects.equals(type, "motorway") && link.getFreespeed() >= speedLimit) {
                 link.setFreespeed(speedLimit);
                 link.getAttributes().putAttribute("isModified", true);
             } else {
