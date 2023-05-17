@@ -47,10 +47,10 @@ public class ImplementCityWideSpeedLimit {
             var fromNode = isBerlinByNode.get(link.getFromNode().getId());
             var toNode = isBerlinByNode.get(link.getToNode().getId());
             var type = link.getAttributes().getAttribute("type");
-            var allowedMode = link.getAttributes().getAttribute("Allowed Transport Mode");
+            var modes = link.getAllowedModes();
             if ((fromNode || toNode) &&
                     !Objects.equals(type, "motorway") &&
-                    !Objects.equals(allowedMode, "pt") &&
+                    !modes.contains("pt")&&
                     link.getFreespeed() > speedLimit) {
                 link.setFreespeed(speedLimit);
                 link.getAttributes().putAttribute("isModified", true);
