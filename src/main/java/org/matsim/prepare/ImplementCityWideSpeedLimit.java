@@ -18,7 +18,7 @@ import java.util.Objects;
 public class ImplementCityWideSpeedLimit {
 
     private static MultiPolygon readBerlinShape(GeometryFactory geometryFactory) throws IOException {
-        var file = Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin.dbf").toFile();
+        var file = Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-shp", "berlin.dbf").toFile();
         var reader = new ShapefileReader(new ShpFiles(file), true, true, geometryFactory);
         var shape = (MultiPolygon) reader.nextRecord().shape();
         reader.close();
