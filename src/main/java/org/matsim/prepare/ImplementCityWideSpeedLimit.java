@@ -13,9 +13,11 @@ import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
+import java.util.Set;
 
 public class ImplementCityWideSpeedLimit {
+
+    private static final Set<String> ROAD_TYPES_EXCLUDED_FROM_SPEED_LIMIT = Set.of("motorway", "motorway_link", "trunk", "trunk_link");
 
     private static MultiPolygon readBerlinShape(GeometryFactory geometryFactory) throws IOException {
         var file = Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-shp", "berlin.dbf").toFile();
@@ -46,11 +48,11 @@ public class ImplementCityWideSpeedLimit {
         for (var link : network.getLinks().values()) {
             var fromNode = isBerlinByNode.get(link.getFromNode().getId());
             var toNode = isBerlinByNode.get(link.getToNode().getId());
-            var type = link.getAttributes().getAttribute("type");
+            var type = (String) link.getAttributes().getAttribute("type");
             var modes = link.getAllowedModes();
             if ((fromNode || toNode) &&
-                    !Objects.equals(type, "motorway") &&
-                    !modes.contains("pt")&&
+                    !ROAD_TYPES_EXCLUDED_FROM_SPEED_LIMIT.contains(type) &&
+                    !modes.contains("pt") &&
                     link.getFreespeed() > speedLimit) {
                 link.setFreespeed(speedLimit);
                 link.getAttributes().putAttribute("isModified", true);
@@ -59,7 +61,7 @@ public class ImplementCityWideSpeedLimit {
             }
         }
 
-        NetworkUtils.writeNetwork(network, Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-v5.5-network-annotated.xml.gz").toString());
+        NetworkUtils.writeNetwork(network, Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-v5.5-network-with-speed-limit.xml.gz").toString());
     }
 
 }
