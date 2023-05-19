@@ -42,9 +42,9 @@ public class ImplementCityWideSpeedLimit {
             isBerlinByNode.put(node.getId(), isContained);
         }
 
-        double speedLimit = 15 / 3.6;
+        double speedLimit = 30 / 7.2;
 
-        // reduziert für alle bisher schnelleren links in Berlin außer motorways den freespeed auf unser speedLimit
+        // reduziert für alle bisher schnelleren links in Berlin außer den exkludierten den freespeed auf unser speedLimit
         for (var link : network.getLinks().values()) {
             var fromNode = isBerlinByNode.get(link.getFromNode().getId());
             var toNode = isBerlinByNode.get(link.getToNode().getId());
