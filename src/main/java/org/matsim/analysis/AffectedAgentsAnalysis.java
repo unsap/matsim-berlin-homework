@@ -21,7 +21,7 @@ import java.io.Writer;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class AffectedAgentsExporter {
+public class AffectedAgentsAnalysis {
 
     private static class PersonData {
 
@@ -84,7 +84,6 @@ public class AffectedAgentsExporter {
                 population.get(event.getPersonId()).setHasUsedModifiedLink();
             }
             vehiclePassengers.computeIfAbsent(event.getVehicleId(), vehicleId -> new HashSet<>()).add(event.getPersonId());
-            System.out.println(usesModifiedLink(event));
         }
 
         @Override
@@ -101,7 +100,7 @@ public class AffectedAgentsExporter {
             population.put(person.getId(), new PersonData(person));
         }
 
-        var network_path = Paths.get("scenarios", "berlin-annotatede-10pct-100i", "berlin-v5.5-network-annotated.xml.gz");
+        var network_path = Paths.get("scenarios", "berlin-annotated-10pct-100i", "berlin-v5.5-network-annotated.xml.gz");
         var network = NetworkUtils.readNetwork(network_path.toString());
 
         var event_handler = new AffectedAgentsEventHandler(population, network);
