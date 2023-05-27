@@ -21,10 +21,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class LinkAnalysis {
@@ -34,6 +31,8 @@ public class LinkAnalysis {
     private final Map<Id<Link>, LinkData> policy;
     private final Map<Id<Link>, LinkData> difference;
 
+    public static final int DURATION_ONE_HOUR = 60 * 60;
+
     private static class LinkData {
 
         private final String suffix;
@@ -41,6 +40,10 @@ public class LinkAnalysis {
          * Number of vehicles which used this link during the whole scenario.
          */
         private final int vehicleCount;
+        /**
+         * Number of vehicles which used this link during the peak hour for this link.
+         */
+        private final int peakHourVehicleCount;
         /**
          * Average time vehicles needed to traverse this link.
          * Excludes vehicles which entered / left the link between its boundary nodes.
@@ -54,18 +57,20 @@ public class LinkAnalysis {
          */
         private final @Nullable Double maxTravelTime;
 
-        private LinkData(String suffix, int vehicleCount, @Nullable Double averageTravelTime, @Nullable Double maxTravelTime) {
+        private LinkData(String suffix, int vehicleCount, int peakHourVehicleCount, @Nullable Double averageTravelTime, @Nullable Double maxTravelTime) {
             this.suffix = suffix;
             this.vehicleCount = vehicleCount;
+            this.peakHourVehicleCount = peakHourVehicleCount;
             this.averageTravelTime = averageTravelTime;
             this.maxTravelTime = maxTravelTime;
         }
 
         public static LinkData createDifference(LinkData base, LinkData policy) {
             int vehicleCount = policy.vehicleCount - base.vehicleCount;
+            int peakHourVehicleCount = policy.peakHourVehicleCount - base.peakHourVehicleCount;
             Double averageTravelTime = subtract(policy.averageTravelTime, base.averageTravelTime);
             Double maxTravelTime = subtract(policy.maxTravelTime, base.maxTravelTime);
-            return new LinkData("Difference", vehicleCount, averageTravelTime, maxTravelTime);
+            return new LinkData("Difference", vehicleCount, peakHourVehicleCount, averageTravelTime, maxTravelTime);
         }
 
         private static @Nullable Double subtract(@Nullable Double minuend, @Nullable Double subtrahend) {
@@ -79,6 +84,7 @@ public class LinkAnalysis {
         public void modifyLink(Link link) {
             Attributes attributes = link.getAttributes();
             attributes.putAttribute(String.format("vehicleCount%s", suffix), vehicleCount);
+            attributes.putAttribute(String.format("peakHourVehicleCount%s", suffix), peakHourVehicleCount);
             if (averageTravelTime != null) {
                 attributes.putAttribute(String.format("averageTravelTime%s", suffix), averageTravelTime);
             }
@@ -89,13 +95,50 @@ public class LinkAnalysis {
 
     }
 
+    private static class VehicleEnter {
+
+        private final double enterTime;
+        private final boolean isEnteredAtFromNode;
+
+        private VehicleEnter(double enterTime, boolean isEnteredAtFromNode) {
+            this.enterTime = enterTime;
+            this.isEnteredAtFromNode = isEnteredAtFromNode;
+        }
+
+        public VehicleTraversal withLeave(double leaveTime, boolean isLeftAtToNode) {
+            return new VehicleTraversal(enterTime, isEnteredAtFromNode, leaveTime, isLeftAtToNode);
+        }
+
+    }
+
+    private static class VehicleTraversal {
+
+        private final double enterTime;
+        private final boolean isEnteredAtFromNode;
+        private final double leaveTime;
+        private final boolean isLeftAtToNode;
+
+        private VehicleTraversal(double enterTime, boolean isEnteredAtFromNode, double leaveTime, boolean isLeftAtToNode) {
+            this.enterTime = enterTime;
+            this.isEnteredAtFromNode = isEnteredAtFromNode;
+            this.leaveTime = leaveTime;
+            this.isLeftAtToNode = isLeftAtToNode;
+        }
+
+    }
+
     private static class LinkDataBuilder {
 
         private int vehicleCount = 0;
-        private final Map<Id<Vehicle>, Double> vehicleEnterTimes = new HashMap<>();
-        private final List<Double> travelTimes = new ArrayList<>();
+        private final Map<Id<Vehicle>, VehicleEnter> vehicleEnters = new HashMap<>();
+        private final List<VehicleTraversal> vehicleTraversals = new ArrayList<>();
 
         public LinkData build(String suffix) {
+            List<Double> travelTimes = vehicleTraversals.stream()
+                    .filter(vehicleTraversal -> vehicleTraversal.isEnteredAtFromNode)
+                    .filter(vehicleTraversal -> vehicleTraversal.isLeftAtToNode)
+                    .map(vehicleTraversal -> vehicleTraversal.leaveTime - vehicleTraversal.enterTime)
+                    .collect(Collectors.toList());
             Double averageTravelTime;
             if (vehicleCount == 0) {
                 averageTravelTime = null;
@@ -104,7 +147,29 @@ public class LinkAnalysis {
             }
             Double maxTravelTime = travelTimes.stream()
                     .max(Double::compareTo).orElse(null);
-            return new LinkData(suffix, vehicleCount, averageTravelTime, maxTravelTime);
+            return new LinkData(suffix, vehicleCount, calculateVehicleCountInPeriod(), averageTravelTime, maxTravelTime);
+        }
+
+        private int calculateVehicleCountInPeriod() {
+            int peakHourVehicleCount = 0;
+            PriorityQueue<VehicleTraversal> vehicleTraversalsInSlidingHourWindow = new PriorityQueue<>(Comparator.comparing(vehicleTraversal -> vehicleTraversal.leaveTime));
+            for (VehicleTraversal vehicleTraversal : vehicleTraversals) {
+                double timeBeforeOneHour = vehicleTraversal.enterTime - LinkAnalysis.DURATION_ONE_HOUR;
+                while (isOldestTraversalOlderThan(vehicleTraversalsInSlidingHourWindow, timeBeforeOneHour)) {
+                    vehicleTraversalsInSlidingHourWindow.poll();
+                }
+                vehicleTraversalsInSlidingHourWindow.offer(vehicleTraversal);
+                peakHourVehicleCount = Integer.max(peakHourVehicleCount, vehicleTraversalsInSlidingHourWindow.size());
+            }
+            return peakHourVehicleCount;
+        }
+
+        private static boolean isOldestTraversalOlderThan(PriorityQueue<VehicleTraversal> vehicleTraversalsInSlidingHourWindow, double timeBeforeOneHour) {
+            VehicleTraversal oldestVehicleTraversal = vehicleTraversalsInSlidingHourWindow.peek();
+            if (oldestVehicleTraversal == null) {
+                return false;
+            }
+            return oldestVehicleTraversal.leaveTime < timeBeforeOneHour;
         }
 
     }
@@ -130,29 +195,30 @@ public class LinkAnalysis {
 
         @Override
         public void handleEvent(VehicleEntersTrafficEvent event) {
-            linkDataBuilders.get(event.getLinkId()).vehicleCount += 1;
+            LinkDataBuilder linkDataBuilder = linkDataBuilders.get(event.getLinkId());
+            linkDataBuilder.vehicleEnters.put(event.getVehicleId(), new VehicleEnter(event.getTime(), false));
+            linkDataBuilder.vehicleCount += 1;
         }
 
         @Override
         public void handleEvent(LinkEnterEvent event) {
             LinkDataBuilder linkDataBuilder = linkDataBuilders.get(event.getLinkId());
-            linkDataBuilder.vehicleEnterTimes.put(event.getVehicleId(), event.getTime());
+            linkDataBuilder.vehicleEnters.put(event.getVehicleId(), new VehicleEnter(event.getTime(), true));
             linkDataBuilder.vehicleCount += 1;
         }
 
         @Override
         public void handleEvent(LinkLeaveEvent event) {
             LinkDataBuilder linkDataBuilder = linkDataBuilders.get(event.getLinkId());
-            Double enterTime = linkDataBuilder.vehicleEnterTimes.remove(event.getVehicleId());
-            if (enterTime != null) {
-                linkDataBuilder.travelTimes.add(event.getTime() - enterTime);
-            }
+            VehicleEnter vehicleEnter = linkDataBuilder.vehicleEnters.remove(event.getVehicleId());
+            linkDataBuilder.vehicleTraversals.add(vehicleEnter.withLeave(event.getTime(), true));
         }
 
         @Override
         public void handleEvent(VehicleLeavesTrafficEvent event) {
             LinkDataBuilder linkDataBuilder = linkDataBuilders.get(event.getLinkId());
-            linkDataBuilder.vehicleEnterTimes.remove(event.getVehicleId());
+            VehicleEnter vehicleEnter = linkDataBuilder.vehicleEnters.remove(event.getVehicleId());
+            linkDataBuilder.vehicleTraversals.add(vehicleEnter.withLeave(event.getTime(), false));
         }
 
     }
