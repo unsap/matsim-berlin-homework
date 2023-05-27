@@ -8,6 +8,7 @@ import org.locationtech.jts.geom.MultiPolygon;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Node;
 import org.matsim.core.network.NetworkUtils;
+import org.matsim.utils.objectattributes.attributable.Attributes;
 
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -33,31 +34,37 @@ public class ImplementCityWideSpeedLimit {
         GeometryFactory geometryFactory = new GeometryFactory();
         var shape = readBerlinShape(geometryFactory);
         var network = NetworkUtils.readNetwork(Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-v5.5-network.xml.gz").toString());
-        Map<Id<Node>, Boolean> isBerlinByNode = new HashMap<>();
+        Map<Id<Node>, Boolean> isInBerlinByNode = new HashMap<>();
         for (var node : network.getNodes().values()) {
             double x = node.getCoord().getX();
             double y = node.getCoord().getY();
             boolean isContained = shape.contains(geometryFactory.createPoint(new Coordinate(x, y)));
-            node.getAttributes().putAttribute("isBerlin", isContained);
-            isBerlinByNode.put(node.getId(), isContained);
+            node.getAttributes().putAttribute("isInBerlin", isContained);
+            isInBerlinByNode.put(node.getId(), isContained);
         }
 
         double speedLimit = 30 / 7.2;
 
         // reduziert für alle bisher schnelleren links in Berlin außer den exkludierten den freespeed auf unser speedLimit
         for (var link : network.getLinks().values()) {
-            var fromNode = isBerlinByNode.get(link.getFromNode().getId());
-            var toNode = isBerlinByNode.get(link.getToNode().getId());
-            var type = (String) link.getAttributes().getAttribute("type");
+            var isFromNodeInBerlin = isInBerlinByNode.get(link.getFromNode().getId());
+            var isToNodeInBerlin = isInBerlinByNode.get(link.getToNode().getId());
+            Attributes attributes = link.getAttributes();
+            var type = (String) attributes.getAttribute("type");
             var modes = link.getAllowedModes();
-            if ((fromNode || toNode) &&
-                    !ROAD_TYPES_EXCLUDED_FROM_SPEED_LIMIT.contains(type) &&
-                    !modes.contains("pt") &&
-                    link.getFreespeed() > speedLimit) {
+            boolean isInBerlin = isFromNodeInBerlin || isToNodeInBerlin;
+            boolean isRelevantRoadType = type != null && !ROAD_TYPES_EXCLUDED_FROM_SPEED_LIMIT.contains(type);
+            boolean isRelevantMode = !modes.contains("pt");
+            boolean isFasterThanSpeedLimit = link.getFreespeed() > speedLimit;
+            attributes.putAttribute("isInBerlin", isInBerlin);
+            attributes.putAttribute("isRelevantRoadType", isRelevantRoadType);
+            attributes.putAttribute("isRelevantMode", isRelevantMode);
+            attributes.putAttribute("isFasterThanSpeedLimit", isFasterThanSpeedLimit);
+            if (isInBerlin && isRelevantRoadType && isRelevantMode && isFasterThanSpeedLimit) {
                 link.setFreespeed(speedLimit);
-                link.getAttributes().putAttribute("isModified", true);
+                attributes.putAttribute("isModified", true);
             } else {
-                link.getAttributes().putAttribute("isModified", false);
+                attributes.putAttribute("isModified", false);
             }
         }
 
