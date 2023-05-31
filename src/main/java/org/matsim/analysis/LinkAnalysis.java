@@ -27,23 +27,38 @@ import java.util.stream.Collectors;
 public class LinkAnalysis {
 
     private final Network network;
-    private final Map<Id<Link>, LinkData> base;
-    private final Map<Id<Link>, LinkData> policy;
-    private final Map<Id<Link>, LinkData> difference;
+    private final Map<Id<Link>, LinkData<Integer>> base;
+    private final Map<Id<Link>, LinkData<Integer>> policy;
+    /**
+     * Contains the absolute differences between base and policy case.
+     * negative values means that it has decreased in the policy case,
+     * 0 means unchanged,
+     * positive values means that it has increased.
+     */
+    private final Map<Id<Link>, LinkData<Integer>> absoluteDifference;
+    /**
+     * Contains the relative differences between base and policy case.
+     * negative values means that it has decreased (e.g. -1 means that it was reduced to 0, -0.5 means it has halved),
+     * 0 means unchanged,
+     * positive values means that it has increased (e.g. 1 means it has doubled).
+     */
+    private final Map<Id<Link>, LinkData<Double>> relativeDifference;
 
     public static final int DURATION_ONE_HOUR = 60 * 60;
 
-    private static class LinkData {
+    private static class LinkData<T> {
 
         private final String suffix;
         /**
          * Number of vehicles which used this link during the whole scenario.
+         * {@code int} for base, policy and absolute difference, {@code double} for relative difference where it may be {@code null}.
          */
-        private final int vehicleCount;
+        private final T vehicleCount;
         /**
          * Number of vehicles which used this link during the peak hour for this link.
+         * {@code int} for base, policy and absolute difference, {@code double} for relative difference where it may be {@code null}.
          */
-        private final int peakHourVehicleCount;
+        private final T peakHourVehicleCount;
         /**
          * Average time vehicles needed to traverse this link.
          * Excludes vehicles which entered / left the link between its boundary nodes.
@@ -57,7 +72,7 @@ public class LinkAnalysis {
          */
         private final @Nullable Double maxTravelTime;
 
-        private LinkData(String suffix, int vehicleCount, int peakHourVehicleCount, @Nullable Double averageTravelTime, @Nullable Double maxTravelTime) {
+        private LinkData(String suffix, T vehicleCount, T peakHourVehicleCount, @Nullable Double averageTravelTime, @Nullable Double maxTravelTime) {
             this.suffix = suffix;
             this.vehicleCount = vehicleCount;
             this.peakHourVehicleCount = peakHourVehicleCount;
@@ -65,12 +80,20 @@ public class LinkAnalysis {
             this.maxTravelTime = maxTravelTime;
         }
 
-        public static LinkData createDifference(LinkData base, LinkData policy) {
+        public static LinkData<Integer> createAbsoluteDifference(LinkData<Integer> base, LinkData<Integer> policy) {
             int vehicleCount = policy.vehicleCount - base.vehicleCount;
             int peakHourVehicleCount = policy.peakHourVehicleCount - base.peakHourVehicleCount;
             Double averageTravelTime = subtract(policy.averageTravelTime, base.averageTravelTime);
             Double maxTravelTime = subtract(policy.maxTravelTime, base.maxTravelTime);
-            return new LinkData("Difference", vehicleCount, peakHourVehicleCount, averageTravelTime, maxTravelTime);
+            return new LinkData<>("DifferenceAbsolute", vehicleCount, peakHourVehicleCount, averageTravelTime, maxTravelTime);
+        }
+
+        public static LinkData<Double> createRelativeDifference(LinkData<Integer> base, LinkData<Integer> policy) {
+            Double vehicleCount = relativeDifference((double) policy.vehicleCount, (double) base.vehicleCount);
+            Double peakHourVehicleCount = relativeDifference((double) policy.peakHourVehicleCount, (double) base.peakHourVehicleCount);
+            Double averageTravelTime = relativeDifference(policy.averageTravelTime, base.averageTravelTime);
+            Double maxTravelTime = relativeDifference(policy.maxTravelTime, base.maxTravelTime);
+            return new LinkData<>("DifferenceRelative", vehicleCount, peakHourVehicleCount, averageTravelTime, maxTravelTime);
         }
 
         private static @Nullable Double subtract(@Nullable Double minuend, @Nullable Double subtrahend) {
@@ -81,10 +104,22 @@ public class LinkAnalysis {
             }
         }
 
+        private static @Nullable Double relativeDifference(@Nullable Double policy, @Nullable Double base) {
+            if (policy == null || base == null || base == 0.0) {
+                return null;
+            } else {
+                return (policy - base) / base;
+            }
+        }
+
         public void modifyLink(Link link) {
             Attributes attributes = link.getAttributes();
-            attributes.putAttribute(String.format("vehicleCount%s", suffix), vehicleCount);
-            attributes.putAttribute(String.format("peakHourVehicleCount%s", suffix), peakHourVehicleCount);
+            if (vehicleCount != null) {
+                attributes.putAttribute(String.format("vehicleCount%s", suffix), vehicleCount);
+            }
+            if (peakHourVehicleCount != null) {
+                attributes.putAttribute(String.format("peakHourVehicleCount%s", suffix), peakHourVehicleCount);
+            }
             if (averageTravelTime != null) {
                 attributes.putAttribute(String.format("averageTravelTime%s", suffix), averageTravelTime);
             }
@@ -133,7 +168,7 @@ public class LinkAnalysis {
         private final Map<Id<Vehicle>, VehicleEnter> vehicleEnters = new HashMap<>();
         private final List<VehicleTraversal> vehicleTraversals = new ArrayList<>();
 
-        public LinkData build(String suffix) {
+        public LinkData<Integer> build(String suffix) {
             List<Double> travelTimes = vehicleTraversals.stream()
                     .filter(vehicleTraversal -> vehicleTraversal.isEnteredAtFromNode)
                     .filter(vehicleTraversal -> vehicleTraversal.isLeftAtToNode)
@@ -147,7 +182,7 @@ public class LinkAnalysis {
             }
             Double maxTravelTime = travelTimes.stream()
                     .max(Double::compareTo).orElse(null);
-            return new LinkData(suffix, vehicleCount, calculateVehicleCountInPeriod(), averageTravelTime, maxTravelTime);
+            return new LinkData<>(suffix, vehicleCount, calculateVehicleCountInPeriod(), averageTravelTime, maxTravelTime);
         }
 
         private int calculateVehicleCountInPeriod() {
@@ -183,7 +218,7 @@ public class LinkAnalysis {
                     .collect(Collectors.toMap(Map.Entry::getKey, entry -> new LinkDataBuilder()));
         }
 
-        public static Map<Id<Link>, LinkData> analyzeLinkData(Network network, Path events_path, String suffix) {
+        public static Map<Id<Link>, LinkData<Integer>> analyzeLinkData(Network network, Path events_path, String suffix) {
             var event_handler = new LinkAnalysisEventHandler(network);
             var event_manager = EventsUtils.createEventsManager();
             event_manager.addHandler(event_handler);
@@ -227,12 +262,14 @@ public class LinkAnalysis {
         network = NetworkUtils.readNetwork(network_path.toString());
         base = LinkAnalysisEventHandler.analyzeLinkData(network, events_path_base, "Base");
         policy = LinkAnalysisEventHandler.analyzeLinkData(network, events_path_policy, "Policy");
-        difference = base.keySet().stream()
-                .collect(Collectors.toMap(Functions.identity(), link -> LinkData.createDifference(base.get(link), policy.get(link))));
+        absoluteDifference = base.keySet().stream()
+                .collect(Collectors.toMap(Functions.identity(), link -> LinkData.createAbsoluteDifference(base.get(link), policy.get(link))));
+        relativeDifference = base.keySet().stream()
+                .collect(Collectors.toMap(Functions.identity(), link -> LinkData.createRelativeDifference(base.get(link), policy.get(link))));
     }
 
     public void writeModifiedNetwork(Path network_analyzed_path) {
-        for (var linkData : List.of(base, policy, difference)) {
+        for (var linkData : List.of(base, policy, absoluteDifference, relativeDifference)) {
             for (var entry : linkData.entrySet()) {
                 var link = network.getLinks().get(entry.getKey());
                 entry.getValue().modifyLink(link);
