@@ -290,6 +290,15 @@ public class ScenarioCreator {
         writeModifiedAttribute(linkData.link, "KB", isModified);
     }
 
+    public static void carBan(LinkData linkData) {
+        boolean isModified = linkData.matchesSubNetwork
+                && linkData.roadKind != RoadKind.OTHER_STREET;
+        if (isModified) {
+            linkData.link.setCapacity(0.1);
+        }
+        writeModifiedAttribute(linkData.link, "MV", isModified);
+    }
+
     private static MultiPolygon readBerlinShape(GeometryFactory geometryFactory) throws IOException {
         var file = Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-shp", "berlin.dbf").toFile();
         var reader = new ShapefileReader(new ShpFiles(file), true, true, geometryFactory);
@@ -312,6 +321,7 @@ public class ScenarioCreator {
         scenarioCreator.createScenario("KR-HS", List.of(ScenarioCreator::reduceCapacityOnMainStreets));
         scenarioCreator.createScenario("KR-WS", List.of(ScenarioCreator::reduceCapacityOnSideStreets));
         scenarioCreator.createScenario("KB", List.of(ScenarioCreator::kietzblocks));
+        scenarioCreator.createScenario("MV", List.of(ScenarioCreator::carBan));
         // create stacked scenarios
         scenarioCreator.createScenario("S1", List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
