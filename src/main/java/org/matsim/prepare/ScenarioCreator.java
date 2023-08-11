@@ -261,6 +261,9 @@ public class ScenarioCreator {
         if (isModified) {
             if (numberOfLanes <= 1) {
                 linkData.link.setCapacity(0.5 * linkData.link.getCapacity());
+            } else if (numberOfLanes < 2) {
+                linkData.link.setCapacity(0.5 * linkData.link.getCapacity());
+                linkData.link.setNumberOfLanes(1);
             } else {
                 linkData.link.setCapacity((numberOfLanes - 1) / numberOfLanes * linkData.link.getCapacity());
                 linkData.link.setNumberOfLanes(numberOfLanes - 1);
