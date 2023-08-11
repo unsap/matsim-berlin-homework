@@ -184,9 +184,9 @@ public class ScenarioCreator {
     public void createScenario(String abbreviation, List<Consumer<LinkData>> modifiers) {
         log.info(String.format("Creating scenario %s", abbreviation));
         Path scenarioPath = scenariosPath.resolve(String.format("berlin-v5.5-%s", abbreviation)).resolve("input");
-        boolean scenarioDirectoryExists = scenarioPath.toFile().mkdirs();
-        if (!scenarioDirectoryExists) {
-            log.error(String.format("Directory %s could not be created", scenarioPath));
+        boolean scenarioDirectoryCreated = scenarioPath.toFile().mkdirs();
+        if (scenarioDirectoryCreated) {
+            log.info(String.format("Directory %s created", scenarioPath));
         }
         Path createdNetworkPath = scenarioPath.resolve(String.format("berlin-v5.5.network-%s.xml.gz", abbreviation));
         NetworkUtils.writeNetwork(createModifiedNetwork(modifiers), createdNetworkPath.toString());
