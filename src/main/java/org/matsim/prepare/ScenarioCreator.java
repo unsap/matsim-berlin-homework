@@ -243,7 +243,7 @@ public class ScenarioCreator {
         Path relativePath = createdNetworkPath.getParent().relativize(originalConfigPath.getParent());
         Config config = createConfigClone();
         config.controler().setLastIteration(100);
-        config.controler().setOutputDirectory(Paths.get("..", "output").toString());
+        config.controler().setOutputDirectory(Paths.get("output").toString());
         config.network().setInputFile(createdNetworkPath.getFileName().toString());
         config.plans().setInputFile(relativePath.resolve(originalConfig.plans().getInputFile()).toString());
         config.transit().setTransitScheduleFile(relativePath.resolve(originalConfig.transit().getTransitScheduleFile()).toString());
