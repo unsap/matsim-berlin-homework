@@ -3,9 +3,12 @@ package org.matsim.prepare;
 import org.apache.log4j.Logger;
 import org.geotools.data.shapefile.files.ShpFiles;
 import org.geotools.data.shapefile.shp.ShapefileReader;
+import org.geotools.geometry.jts.JTS;
+import org.geotools.referencing.CRS;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.MultiPolygon;
+import org.locationtech.jts.geom.Point;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
@@ -13,6 +16,11 @@ import org.matsim.api.core.v01.network.Node;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
+import org.matsim.core.utils.geometry.geotools.MGC;
+import org.opengis.referencing.FactoryException;
+import org.opengis.referencing.crs.CoordinateReferenceSystem;
+import org.opengis.referencing.operation.MathTransform;
+import org.opengis.referencing.operation.TransformException;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -29,7 +37,7 @@ public class ScenarioCreator {
     /**
      * Information for each node whether it is in Berlin
      */
-    private final Map<Id<Node>, Boolean> isInBerlinByNode;
+    private final Map<Id<Node>, AreaKind> areaKindByNode;
     /**
      * Path to the original config
      */
@@ -48,6 +56,18 @@ public class ScenarioCreator {
     private final Path scenariosPath;
 
     private final static Logger log = Logger.getLogger(ScenarioCreator.class);
+
+    public enum AreaKind {
+
+        BRANDENBURG,
+        BERLIN_OUTSIDE_UMWELTZONE,
+        BERLIN_UMWELTZONE;
+
+        public boolean isInBerlin() {
+            return this == BERLIN_OUTSIDE_UMWELTZONE || this == BERLIN_UMWELTZONE;
+        }
+
+    }
 
     public enum RoadKind {
 
@@ -80,24 +100,35 @@ public class ScenarioCreator {
          */
         private final Link link;
         /**
-         * Whether the link is in the subnetwork, meaning it is accessible by car and in Berlin
+         * Whether the link is accessible by car
          */
-        private final boolean matchesSubNetwork;
+        private final boolean isAccessibleByCar;
+        /**
+         * To which area this link belongs
+         */
+        private final AreaKind areaKind;
         /**
          * What kind of road this link represents
          */
         private final RoadKind roadKind;
 
-        public LinkData(Link link, Map<Id<Node>, Boolean> isInBerlinByNode) {
+        public LinkData(Link link, Map<Id<Node>, AreaKind> areaKindByNode) {
             this.link = link;
-            var isFromNodeInBerlin = isInBerlinByNode.get(link.getFromNode().getId());
-            var isToNodeInBerlin = isInBerlinByNode.get(link.getToNode().getId());
-            boolean isInBerlin = isFromNodeInBerlin || isToNodeInBerlin;
-            this.matchesSubNetwork = isInBerlin && !link.getAllowedModes().contains("pt");
+            this.isAccessibleByCar = link.getAllowedModes().contains("car");
+            var areaKindOfFromNode = areaKindByNode.get(link.getFromNode().getId());
+            var areaKindOfToNode = areaKindByNode.get(link.getToNode().getId());
+            if (areaKindOfFromNode == areaKindOfToNode) {
+                this.areaKind = areaKindOfFromNode;
+            } else {
+                // At least one node is in Berlin, but not both are in the Umweltzone.
+                // The best fit for this link is Berlin outside the Umweltzone.
+                this.areaKind = AreaKind.BERLIN_OUTSIDE_UMWELTZONE;
+            }
             var attributes = link.getAttributes();
             var type = (String) attributes.getAttribute("type");
             this.roadKind = RoadKind.fromValue(type);
-            attributes.putAttribute("matchesSubNetwork", matchesSubNetwork);
+            attributes.putAttribute("isAccessibleByCar", isAccessibleByCar);
+            attributes.putAttribute("areaKind", areaKind.name().toLowerCase());
             attributes.putAttribute("roadKind", roadKind.name().toLowerCase());
             attributes.putAttribute("originalFreespeed", link.getFreespeed());
             attributes.putAttribute("originalFlowCapacity", link.getCapacity());
@@ -106,12 +137,12 @@ public class ScenarioCreator {
 
     }
 
-    public ScenarioCreator(GeometryFactory geometryFactory, MultiPolygon berlinShape, Path configPath) {
+    public ScenarioCreator(GeometryFactory geometryFactory, MultiPolygon berlinShape, MultiPolygon berlinUmweltzoneShape, Path configPath) {
         this.originalConfigPath = configPath;
         this.originalConfig = ConfigUtils.loadConfig(configPath.toString());
         Path scenarioPath = configPath.getParent();
         this.originalNetwork = NetworkUtils.readNetwork(scenarioPath.resolve("berlin-v5.5-network.xml.gz").toString());
-        this.isInBerlinByNode = inspectNodes(originalNetwork, geometryFactory, berlinShape);
+        this.areaKindByNode = inspectNodes(originalNetwork, geometryFactory, berlinShape, berlinUmweltzoneShape);
         this.scenariosPath = scenarioPath.getParent().getParent();
     }
 
@@ -120,17 +151,26 @@ public class ScenarioCreator {
      *
      * @return Map which describes for each node whether it is in Berlin
      */
-    private static Map<Id<Node>, Boolean> inspectNodes(Network network, GeometryFactory geometryFactory,
-                                                       MultiPolygon berlinShape) {
-        Map<Id<Node>, Boolean> isInBerlinByNode = new HashMap<>();
+    private static Map<Id<Node>, AreaKind> inspectNodes(Network network, GeometryFactory geometryFactory,
+                                                        MultiPolygon berlinShape,
+                                                        MultiPolygon berlinUmweltzoneShape) {
+        Map<Id<Node>, AreaKind> areaKindByNode = new HashMap<>();
         for (var node : network.getNodes().values()) {
             double x = node.getCoord().getX();
             double y = node.getCoord().getY();
-            boolean isContained = berlinShape.contains(geometryFactory.createPoint(new Coordinate(x, y)));
-            node.getAttributes().putAttribute("isInBerlin", isContained);
-            isInBerlinByNode.put(node.getId(), isContained);
+            Point point = geometryFactory.createPoint(new Coordinate(x, y));
+            AreaKind areaKind;
+            if (!berlinShape.contains(point)) {
+                areaKind = AreaKind.BRANDENBURG;
+            } else if (!berlinUmweltzoneShape.contains(point)) {
+                areaKind = AreaKind.BERLIN_OUTSIDE_UMWELTZONE;
+            } else {
+                areaKind = AreaKind.BERLIN_UMWELTZONE;
+            }
+            node.getAttributes().putAttribute("areaKind", areaKind.name().toLowerCase());
+            areaKindByNode.put(node.getId(), areaKind);
         }
-        return isInBerlinByNode;
+        return areaKindByNode;
     }
 
     /**
@@ -138,9 +178,9 @@ public class ScenarioCreator {
      *
      * @return Links with additional data
      */
-    private List<LinkData> inspectLinks(Network network, Map<Id<Node>, Boolean> isInBerlinByNode) {
+    private List<LinkData> inspectLinks(Network network) {
         return network.getLinks().values().stream()
-                .map(link -> new LinkData(link, isInBerlinByNode))
+                .map(link -> new LinkData(link, areaKindByNode))
                 .collect(Collectors.toList());
     }
 
@@ -219,7 +259,7 @@ public class ScenarioCreator {
      */
     private Network createModifiedNetwork(List<Consumer<LinkData>> modifiers) {
         Network network = createNetworkClone();
-        var linkDatas = inspectLinks(network, isInBerlinByNode);
+        var linkDatas = inspectLinks(network);
         for (Consumer<LinkData> modifier : modifiers) {
             for (LinkData linkData : linkDatas) {
                 modifier.accept(linkData);
@@ -234,7 +274,8 @@ public class ScenarioCreator {
 
     public static void reduceFreespeedOnMainStreets(LinkData linkData) {
         double speedLimit = 30 / 7.2;
-        boolean isModified = linkData.matchesSubNetwork
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind.isInBerlin()
                 && linkData.link.getFreespeed() > speedLimit
                 && linkData.roadKind == RoadKind.MAIN_STREET;
         if (isModified) {
@@ -245,7 +286,8 @@ public class ScenarioCreator {
 
     public static void reduceFreespeedOnSideStreets(LinkData linkData) {
         double speedLimit = 15 / 7.2;
-        boolean isModified = linkData.matchesSubNetwork
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind.isInBerlin()
                 && linkData.link.getFreespeed() > speedLimit
                 && linkData.roadKind == RoadKind.SIDE_STREET;
         if (isModified) {
@@ -256,7 +298,8 @@ public class ScenarioCreator {
 
     public static void reduceCapacityOnMainStreets(LinkData linkData) {
         double numberOfLanes = linkData.link.getNumberOfLanes();
-        boolean isModified = linkData.matchesSubNetwork
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind.isInBerlin()
                 && linkData.roadKind == RoadKind.MAIN_STREET;
         if (isModified) {
             if (numberOfLanes <= 1) {
@@ -273,7 +316,8 @@ public class ScenarioCreator {
     }
 
     public static void reduceCapacityOnSideStreets(LinkData linkData) {
-        boolean isModified = linkData.matchesSubNetwork
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind.isInBerlin()
                 && linkData.roadKind == RoadKind.SIDE_STREET;
         if (isModified) {
             linkData.link.setCapacity(0.5 * linkData.link.getCapacity());
@@ -281,8 +325,9 @@ public class ScenarioCreator {
         writeModifiedAttribute(linkData.link, "KR-WS", isModified);
     }
 
-    public static void kietzblocks(LinkData linkData) {
-        boolean isModified = linkData.matchesSubNetwork
+    public static void kiezblocks(LinkData linkData) {
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind.isInBerlin()
                 && linkData.roadKind == RoadKind.SIDE_STREET;
         if (isModified) {
             linkData.link.setCapacity(0.1);
@@ -290,8 +335,19 @@ public class ScenarioCreator {
         writeModifiedAttribute(linkData.link, "KB", isModified);
     }
 
+    public static void kiezblocksOnlyInUmweltzone(LinkData linkData) {
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind == AreaKind.BERLIN_UMWELTZONE
+                && linkData.roadKind == RoadKind.SIDE_STREET;
+        if (isModified) {
+            linkData.link.setCapacity(0.1);
+        }
+        writeModifiedAttribute(linkData.link, "KB-2", isModified);
+    }
+
     public static void carBan(LinkData linkData) {
-        boolean isModified = linkData.matchesSubNetwork
+        boolean isModified = linkData.isAccessibleByCar
+                && linkData.areaKind.isInBerlin()
                 && linkData.roadKind != RoadKind.OTHER_STREET;
         if (isModified) {
             linkData.link.setCapacity(0.1);
@@ -299,20 +355,29 @@ public class ScenarioCreator {
         writeModifiedAttribute(linkData.link, "MV", isModified);
     }
 
-    private static MultiPolygon readBerlinShape(GeometryFactory geometryFactory) throws IOException {
-        var file = Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-shp", "berlin.dbf").toFile();
+    private static MultiPolygon readShape(GeometryFactory geometryFactory, Path shapeFilePath) throws IOException {
+        var file = shapeFilePath.toFile();
         var reader = new ShapefileReader(new ShpFiles(file), true, true, geometryFactory);
         var shape = (MultiPolygon) reader.nextRecord().shape();
         reader.close();
         return shape;
     }
 
-    public static void main(String[] args) throws IOException {
-        GeometryFactory geometryFactory = new GeometryFactory();
-        MultiPolygon berlinShape = readBerlinShape(geometryFactory);
+    private static MultiPolygon transformShape(MultiPolygon shape, String shapeCRS) throws FactoryException, TransformException {
+        CoordinateReferenceSystem sourceCRS = MGC.getCRS(shapeCRS);
+        CoordinateReferenceSystem targetCRS = MGC.getCRS("EPSG:31468");
+        MathTransform transform = CRS.findMathTransform(sourceCRS, targetCRS, true);
+        return (MultiPolygon) JTS.transform(shape, transform);
+    }
 
-        Path networkPath = Paths.get("scenarios", "berlin-v5.5-10pct", "input", "berlin-v5.5-10pct.config.xml");
-        var scenarioCreator = new ScenarioCreator(geometryFactory, berlinShape, networkPath);
+    public static void main(String[] args) throws IOException, FactoryException, TransformException {
+        GeometryFactory geometryFactory = new GeometryFactory();
+        Path inputPath = Paths.get("scenarios", "berlin-v5.5-10pct", "input");
+        Path configPath = inputPath.resolve("berlin-v5.5-10pct.config.xml");
+        MultiPolygon berlinShape = readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("berlin.dbf"));
+        MultiPolygon berlinUmweltzoneShape = transformShape(readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("Umweltzone_Berlin.dbf")), "EPSG:25833");
+
+        var scenarioCreator = new ScenarioCreator(geometryFactory, berlinShape, berlinUmweltzoneShape, configPath);
         // create base scenario (a new network file will be created because they have additional attributes)
         scenarioCreator.createScenario("BASE", List.of());
         // create scenarios with a single measure
@@ -320,8 +385,13 @@ public class ScenarioCreator {
         scenarioCreator.createScenario("GR-WS", List.of(ScenarioCreator::reduceFreespeedOnSideStreets));
         scenarioCreator.createScenario("KR-HS", List.of(ScenarioCreator::reduceCapacityOnMainStreets));
         scenarioCreator.createScenario("KR-WS", List.of(ScenarioCreator::reduceCapacityOnSideStreets));
-        scenarioCreator.createScenario("KB", List.of(ScenarioCreator::kietzblocks));
+        scenarioCreator.createScenario("KB", List.of(ScenarioCreator::kiezblocks));
+        scenarioCreator.createScenario("KB-2", List.of(ScenarioCreator::kiezblocksOnlyInUmweltzone));
         scenarioCreator.createScenario("MV", List.of(ScenarioCreator::carBan));
+        // create semi-stacked scenario
+        scenarioCreator.createScenario("KB-3", List.of(
+                ScenarioCreator::reduceCapacityOnSideStreets,
+                ScenarioCreator::kiezblocksOnlyInUmweltzone));
         // create stacked scenarios
         scenarioCreator.createScenario("S1", List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
@@ -340,7 +410,13 @@ public class ScenarioCreator {
                 ScenarioCreator::reduceFreespeedOnSideStreets,
                 ScenarioCreator::reduceCapacityOnMainStreets,
                 ScenarioCreator::reduceCapacityOnSideStreets,
-                ScenarioCreator::kietzblocks));
+                ScenarioCreator::kiezblocks));
+        scenarioCreator.createScenario("S4-2", List.of(
+                ScenarioCreator::reduceFreespeedOnMainStreets,
+                ScenarioCreator::reduceFreespeedOnSideStreets,
+                ScenarioCreator::reduceCapacityOnMainStreets,
+                ScenarioCreator::reduceCapacityOnSideStreets,
+                ScenarioCreator::kiezblocksOnlyInUmweltzone));
     }
 
 }
