@@ -405,6 +405,11 @@ public class ScenarioCreator {
                 ScenarioCreator::reduceFreespeedOnSideStreets,
                 ScenarioCreator::reduceCapacityOnMainStreets,
                 ScenarioCreator::reduceCapacityOnSideStreets));
+        scenarioCreator.createScenario("S3-2", List.of(
+                ScenarioCreator::reduceFreespeedOnMainStreets,
+                ScenarioCreator::reduceFreespeedOnSideStreets,
+                ScenarioCreator::reduceCapacityOnMainStreets,
+                ScenarioCreator::kiezblocksOnlyInUmweltzone));
         scenarioCreator.createScenario("S4", List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets,
