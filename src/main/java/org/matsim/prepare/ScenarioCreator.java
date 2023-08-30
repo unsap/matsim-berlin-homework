@@ -13,6 +13,7 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.network.Node;
+import org.matsim.common.BerlinScenario;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
@@ -315,26 +316,6 @@ public class ScenarioCreator {
         writeModifiedAttribute(linkData.link, "KR-HS", isModified);
     }
 
-    public static void reduceCapacityOnSideStreets(LinkData linkData) {
-        boolean isModified = linkData.isAccessibleByCar
-                && linkData.areaKind.isInBerlin()
-                && linkData.roadKind == RoadKind.SIDE_STREET;
-        if (isModified) {
-            linkData.link.setCapacity(0.5 * linkData.link.getCapacity());
-        }
-        writeModifiedAttribute(linkData.link, "KR-WS", isModified);
-    }
-
-    public static void kiezblocks(LinkData linkData) {
-        boolean isModified = linkData.isAccessibleByCar
-                && linkData.areaKind.isInBerlin()
-                && linkData.roadKind == RoadKind.SIDE_STREET;
-        if (isModified) {
-            linkData.link.setCapacity(0.1);
-        }
-        writeModifiedAttribute(linkData.link, "KB", isModified);
-    }
-
     public static void kiezblocksOnlyInUmweltzone(LinkData linkData) {
         boolean isModified = linkData.isAccessibleByCar
                 && linkData.areaKind == AreaKind.BERLIN_UMWELTZONE
@@ -379,48 +360,25 @@ public class ScenarioCreator {
 
         var scenarioCreator = new ScenarioCreator(geometryFactory, berlinShape, berlinUmweltzoneShape, configPath);
         // create base scenario (a new network file will be created because they have additional attributes)
-        scenarioCreator.createScenario("BASE", List.of());
+        scenarioCreator.createScenario(BerlinScenario.BASE.getScenarioName(), List.of());
         // create scenarios with a single measure
-        scenarioCreator.createScenario("GR-HS", List.of(ScenarioCreator::reduceFreespeedOnMainStreets));
-        scenarioCreator.createScenario("GR-WS", List.of(ScenarioCreator::reduceFreespeedOnSideStreets));
-        scenarioCreator.createScenario("KR-HS", List.of(ScenarioCreator::reduceCapacityOnMainStreets));
-        scenarioCreator.createScenario("KR-WS", List.of(ScenarioCreator::reduceCapacityOnSideStreets));
-        scenarioCreator.createScenario("KB", List.of(ScenarioCreator::kiezblocks));
-        scenarioCreator.createScenario("KB-2", List.of(ScenarioCreator::kiezblocksOnlyInUmweltzone));
-        scenarioCreator.createScenario("MV", List.of(ScenarioCreator::carBan));
-        // create semi-stacked scenario
-        scenarioCreator.createScenario("KB-3", List.of(
-                ScenarioCreator::reduceCapacityOnSideStreets,
-                ScenarioCreator::kiezblocksOnlyInUmweltzone));
+        scenarioCreator.createScenario(BerlinScenario.GR_HS.getScenarioName(), List.of(ScenarioCreator::reduceFreespeedOnMainStreets));
+        scenarioCreator.createScenario(BerlinScenario.GR_WS.getScenarioName(), List.of(ScenarioCreator::reduceFreespeedOnSideStreets));
+        scenarioCreator.createScenario(BerlinScenario.KR_HS.getScenarioName(), List.of(ScenarioCreator::reduceCapacityOnMainStreets));
+        scenarioCreator.createScenario(BerlinScenario.KB.getScenarioName(), List.of(ScenarioCreator::kiezblocksOnlyInUmweltzone));
+        scenarioCreator.createScenario(BerlinScenario.MV.getScenarioName(), List.of(ScenarioCreator::carBan));
         // create stacked scenarios
-        scenarioCreator.createScenario("S1", List.of(
+        scenarioCreator.createScenario(BerlinScenario.S1.getScenarioName(), List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets));
-        scenarioCreator.createScenario("S2", List.of(
+        scenarioCreator.createScenario(BerlinScenario.S2.getScenarioName(), List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets,
                 ScenarioCreator::reduceCapacityOnMainStreets));
-        scenarioCreator.createScenario("S3", List.of(
+        scenarioCreator.createScenario(BerlinScenario.S3.getScenarioName(), List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets,
                 ScenarioCreator::reduceCapacityOnMainStreets,
-                ScenarioCreator::reduceCapacityOnSideStreets));
-        scenarioCreator.createScenario("S3-2", List.of(
-                ScenarioCreator::reduceFreespeedOnMainStreets,
-                ScenarioCreator::reduceFreespeedOnSideStreets,
-                ScenarioCreator::reduceCapacityOnMainStreets,
-                ScenarioCreator::kiezblocksOnlyInUmweltzone));
-        scenarioCreator.createScenario("S4", List.of(
-                ScenarioCreator::reduceFreespeedOnMainStreets,
-                ScenarioCreator::reduceFreespeedOnSideStreets,
-                ScenarioCreator::reduceCapacityOnMainStreets,
-                ScenarioCreator::reduceCapacityOnSideStreets,
-                ScenarioCreator::kiezblocks));
-        scenarioCreator.createScenario("S4-2", List.of(
-                ScenarioCreator::reduceFreespeedOnMainStreets,
-                ScenarioCreator::reduceFreespeedOnSideStreets,
-                ScenarioCreator::reduceCapacityOnMainStreets,
-                ScenarioCreator::reduceCapacityOnSideStreets,
                 ScenarioCreator::kiezblocksOnlyInUmweltzone));
     }
 
