@@ -72,15 +72,15 @@ public class CarOccupancyCheck {
 
     }
 
-    public static void runCheck(Path scenariosPath, String abbreviation) {
-        Path outputPath = scenariosPath.resolve(String.format("berlin-v5.5-%s", abbreviation)).resolve("output");
+    public static void runCheck(Path scenariosPath, String scenario) {
+        Path outputPath = scenariosPath.resolve(scenario).resolve("output");
 
-        Path vehiclesPath = outputPath.resolve(String.format("berlin-v5.5-%s.output_vehicles.xml.gz", abbreviation));
+        Path vehiclesPath = outputPath.resolve(String.format("%s.output_vehicles.xml.gz", scenario));
         Vehicles vehicles = VehicleUtils.createVehiclesContainer();
         MatsimVehicleReader vehicleReader = new MatsimVehicleReader(vehicles);
         vehicleReader.readFile(vehiclesPath.toString());
 
-        Path eventsPath = outputPath.resolve(String.format("berlin-v5.5-%s.output_events.xml.gz", abbreviation));
+        Path eventsPath = outputPath.resolve(String.format("%s.output_events.xml.gz", scenario));
         CarOccupancyCheckEventHandler eventHandler = new CarOccupancyCheckEventHandler(vehicles);
         EventsManager eventsManager = EventsUtils.createEventsManager();
         eventsManager.addHandler(eventHandler);
@@ -91,7 +91,7 @@ public class CarOccupancyCheck {
     /**
      * Run this with:
      * 1. The path to the scenarios directory
-     * 2. The abbreviation of the scenario you want to check
+     * 2. The name of the scenario you want to check
      */
     public static void main(String[] args) {
         runCheck(Path.of(args[0]), args[1]);

@@ -218,19 +218,19 @@ public class ScenarioCreator {
     /**
      * Creates a scenario and saves its files into a folder
      *
-     * @param abbreviation Unique abbreviation for the scenario
-     * @param modifiers    Modifiers for the network
+     * @param scenario  Unique name for the scenario
+     * @param modifiers Modifiers for the network
      */
-    public void createScenario(String abbreviation, List<Consumer<LinkData>> modifiers) {
-        log.info(String.format("Creating scenario %s", abbreviation));
-        Path scenarioPath = scenariosPath.resolve(String.format("berlin-v5.5-%s", abbreviation)).resolve("input");
+    public void createScenario(String scenario, List<Consumer<LinkData>> modifiers) {
+        log.info(String.format("Creating scenario %s", scenario));
+        Path scenarioPath = scenariosPath.resolve(scenario).resolve("input");
         boolean scenarioDirectoryCreated = scenarioPath.toFile().mkdirs();
         if (scenarioDirectoryCreated) {
             log.info(String.format("Directory %s created", scenarioPath));
         }
-        Path createdNetworkPath = scenarioPath.resolve(String.format("berlin-v5.5.network-%s.xml.gz", abbreviation));
+        Path createdNetworkPath = scenarioPath.resolve(String.format("%s.network.xml.gz", scenario));
         NetworkUtils.writeNetwork(createModifiedNetwork(modifiers), createdNetworkPath.toString());
-        Path createdConfigPath = scenarioPath.resolve(String.format("berlin-v5.5.config-%s.xml", abbreviation));
+        Path createdConfigPath = scenarioPath.resolve(String.format("%s.config.xml", scenario));
         ConfigUtils.writeConfig(createModifiedConfig(createdNetworkPath), createdConfigPath.toString());
     }
 

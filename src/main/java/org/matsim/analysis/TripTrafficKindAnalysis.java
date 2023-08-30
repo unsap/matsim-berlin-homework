@@ -193,22 +193,22 @@ public class TripTrafficKindAnalysis {
                 }));
     }
 
-    public static void runAnalysis(Path scenariosPath, String abbreviation) throws IOException {
-        Path scenarioPath = scenariosPath.resolve(String.format("berlin-v5.5-%s", abbreviation));
+    public static void runAnalysis(Path scenariosPath, String scenario) throws IOException {
+        Path scenarioPath = scenariosPath.resolve(scenario);
         Path inputPath = scenarioPath.resolve("input");
         Path outputPath = scenarioPath.resolve("output");
 
-        Path networkPath = inputPath.resolve(String.format("berlin-v5.5.network-%s.xml.gz", abbreviation));
+        Path networkPath = inputPath.resolve(String.format("%s.network.xml.gz", scenario));
         Network network = NetworkUtils.readNetwork(networkPath.toString());
         Map<Id<Link>, AreaKind> areaKindByLink = getAreaKindByLink(network);
 
-        Path eventsPath = outputPath.resolve(String.format("berlin-v5.5-%s.output_events.xml.gz", abbreviation));
+        Path eventsPath = outputPath.resolve(String.format("%s.output_events.xml.gz", scenario));
         EventHandler eventHandler = new EventHandler(areaKindByLink);
         EventsManager eventsManager = EventsUtils.createEventsManager();
         eventsManager.addHandler(eventHandler);
 
         EventsUtils.readEvents(eventsManager, eventsPath.toString());
-        Path csvPath = scenarioPath.resolve("analysis").resolve(String.format("berlin-v5.5-%s.trips_traffic_kind.csv", abbreviation));
+        Path csvPath = scenarioPath.resolve("analysis").resolve(String.format("%s.trips_traffic_kind.csv", scenario));
         boolean analysisDirectoryCreated = csvPath.toFile().mkdirs();
         if (analysisDirectoryCreated) {
             log.info(String.format("Directory %s created", scenarioPath));
@@ -221,7 +221,7 @@ public class TripTrafficKindAnalysis {
     /**
      * Run this with:
      * 1. The path to the scenarios directory
-     * 2. The abbreviation of the scenario you want to check
+     * 2. The name of the scenario you want to check
      */
     public static void main(String[] args) throws IOException {
         runAnalysis(Path.of(args[0]), args[1]);

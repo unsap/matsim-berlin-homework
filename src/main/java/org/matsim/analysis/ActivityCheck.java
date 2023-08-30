@@ -95,10 +95,10 @@ public class ActivityCheck {
 
     }
 
-    public static void runCheck(Path scenariosPath, String abbreviation) {
-        Path outputPath = scenariosPath.resolve(String.format("berlin-v5.5-%s", abbreviation)).resolve("output");
+    public static void runCheck(Path scenariosPath, String scenario) {
+        Path outputPath = scenariosPath.resolve(scenario).resolve("output");
 
-        Path plansPath = outputPath.resolve(String.format("berlin-v5.5-%s.output_plans.xml.gz", abbreviation));
+        Path plansPath = outputPath.resolve(String.format("%s.output_plans.xml.gz", scenario));
         Config config = ConfigUtils.createConfig();
         StreamingPopulationReader streamingPopulationReader = new StreamingPopulationReader(ScenarioUtils.createScenario(config));
         StoreSelectedPlanPersonAlgorithm storeSelectedPlanPersonAlgorithm = new StoreSelectedPlanPersonAlgorithm();
@@ -106,7 +106,7 @@ public class ActivityCheck {
         streamingPopulationReader.readFile(plansPath.toString());
         Map<Id<Person>, List<PlanElement>> selectedPlanByPerson = storeSelectedPlanPersonAlgorithm.selectedPlansByPerson;
 
-        Path eventsPath = outputPath.resolve(String.format("berlin-v5.5-%s.output_events.xml.gz", abbreviation));
+        Path eventsPath = outputPath.resolve(String.format("%s.output_events.xml.gz", scenario));
         ActivityCheckEventHandler eventHandler = new ActivityCheckEventHandler(selectedPlanByPerson);
         EventsManager eventsManager = EventsUtils.createEventsManager();
         eventsManager.addHandler(eventHandler);
@@ -118,7 +118,7 @@ public class ActivityCheck {
     /**
      * Run this with:
      * 1. The path to the scenarios directory
-     * 2. The abbreviation of the scenario you want to check
+     * 2. The name of the scenario you want to check
      */
     public static void main(String[] args) {
         runCheck(Path.of(args[0]), args[1]);
