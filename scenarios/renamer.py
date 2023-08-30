@@ -6,7 +6,7 @@ import re
 def rename(number, abbreviation, old_abbreviation = None):
     if old_abbreviation is None:
         old_abbreviation = abbreviation
-    filename_re = re.compile(rf"(?:{number}\.)?(?:berlin-v5.5(?:-10pct)?(?:-{abbreviation})?|{abbreviation})(.+?)(?:-{abbreviation}|-{old_abbreviation})?(\..+)")
+    filename_re = re.compile(rf"(?:{number}\.)?(?:berlin-v5.5(?:-10pct)?(?:-{old_abbreviation}|-{abbreviation})?|{old_abbreviation}|{abbreviation})(.+?)(?:-{old_abbreviation}|-{abbreviation})?(\..+)")
     for dirpath, dirnames, filenames in os.walk(f"{number}.{abbreviation}"):
         for filename in filenames:
             match = filename_re.match(filename)
