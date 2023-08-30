@@ -152,9 +152,9 @@ public class ScenarioCreator {
      *
      * @return Map which describes for each node whether it is in Berlin
      */
-    private static Map<Id<Node>, AreaKind> inspectNodes(Network network, GeometryFactory geometryFactory,
-                                                        MultiPolygon berlinShape,
-                                                        MultiPolygon berlinUmweltzoneShape) {
+    public static Map<Id<Node>, AreaKind> inspectNodes(Network network, GeometryFactory geometryFactory,
+                                                       MultiPolygon berlinShape,
+                                                       MultiPolygon berlinUmweltzoneShape) {
         Map<Id<Node>, AreaKind> areaKindByNode = new HashMap<>();
         for (var node : network.getNodes().values()) {
             double x = node.getCoord().getX();
@@ -336,7 +336,7 @@ public class ScenarioCreator {
         writeModifiedAttribute(linkData.link, "MV", isModified);
     }
 
-    private static MultiPolygon readShape(GeometryFactory geometryFactory, Path shapeFilePath) throws IOException {
+    public static MultiPolygon readShape(GeometryFactory geometryFactory, Path shapeFilePath) throws IOException {
         var file = shapeFilePath.toFile();
         var reader = new ShapefileReader(new ShpFiles(file), true, true, geometryFactory);
         var shape = (MultiPolygon) reader.nextRecord().shape();
@@ -344,7 +344,7 @@ public class ScenarioCreator {
         return shape;
     }
 
-    private static MultiPolygon transformShape(MultiPolygon shape, String shapeCRS) throws FactoryException, TransformException {
+    public static MultiPolygon transformShape(MultiPolygon shape, String shapeCRS) throws FactoryException, TransformException {
         CoordinateReferenceSystem sourceCRS = MGC.getCRS(shapeCRS);
         CoordinateReferenceSystem targetCRS = MGC.getCRS("EPSG:31468");
         MathTransform transform = CRS.findMathTransform(sourceCRS, targetCRS, true);
