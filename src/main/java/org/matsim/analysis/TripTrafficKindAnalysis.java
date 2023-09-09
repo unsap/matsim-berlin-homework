@@ -1,13 +1,32 @@
 package org.matsim.analysis;
 
-import com.google.common.collect.Iterables;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.Writer;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
 import org.apache.log4j.Logger;
 import org.matsim.api.core.v01.Id;
-import org.matsim.api.core.v01.events.*;
-import org.matsim.api.core.v01.events.handler.*;
+import org.matsim.api.core.v01.events.ActivityEndEvent;
+import org.matsim.api.core.v01.events.ActivityStartEvent;
+import org.matsim.api.core.v01.events.LinkEnterEvent;
+import org.matsim.api.core.v01.events.PersonEntersVehicleEvent;
+import org.matsim.api.core.v01.events.PersonLeavesVehicleEvent;
+import org.matsim.api.core.v01.events.handler.ActivityEndEventHandler;
+import org.matsim.api.core.v01.events.handler.ActivityStartEventHandler;
+import org.matsim.api.core.v01.events.handler.LinkEnterEventHandler;
+import org.matsim.api.core.v01.events.handler.PersonEntersVehicleEventHandler;
+import org.matsim.api.core.v01.events.handler.PersonLeavesVehicleEventHandler;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.Person;
+import org.matsim.common.BerlinScenario;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.events.EventsUtils;
 import org.matsim.core.network.NetworkUtils;
@@ -15,12 +34,7 @@ import org.matsim.core.router.TripStructureUtils;
 import org.matsim.prepare.ScenarioCreator.AreaKind;
 import org.matsim.vehicles.Vehicle;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.Writer;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.stream.Collectors;
+import com.google.common.collect.Iterables;
 
 public class TripTrafficKindAnalysis {
 
@@ -28,11 +42,17 @@ public class TripTrafficKindAnalysis {
 
     private enum TrafficKind {
 
-        BERLIN_ORIGIN,
-        BERLIN_DESTINATION,
-        BERLIN_INTERNAL,
-        BERLIN_THROUGH,
-        NON_BERLIN;
+        BERLIN_ORIGIN("berlin_orig"),
+        BERLIN_DESTINATION("berlin_dest"),
+        BERLIN_INTERNAL("berlin_inner"),
+        BERLIN_TRANSIT("berlin_transit"),
+        NON_BERLIN("non_berlin");
+
+        private final String value;
+
+        TrafficKind(String value) {
+            this.value = value;
+        }
 
         public static TrafficKind fromValues(Boolean originInBerlin, boolean atLeastOneLinkInBerlin, Boolean destinationInBerlin) {
             if (originInBerlin == null || destinationInBerlin == null) {
@@ -47,7 +67,7 @@ public class TripTrafficKindAnalysis {
                 if (destinationInBerlin) {
                     return BERLIN_DESTINATION;
                 } else if (atLeastOneLinkInBerlin) {
-                    return BERLIN_THROUGH;
+                    return BERLIN_TRANSIT;
                 } else {
                     return NON_BERLIN;
                 }
@@ -61,28 +81,40 @@ public class TripTrafficKindAnalysis {
         private final Id<Person> personId;
         private final int tripNumber;
 
-        private Id<Link> startLinkId = null;
-        private Boolean startLinkInBerlin = null;
-        private boolean atLeastOneLinkInBerlin = false;
-        private Id<Link> lastLinkId = null;
-        private Boolean lastLinkInBerlin = null;
+        private final Id<Link> startLinkId;
+        private final boolean startLinkInBerlin;
+        private boolean atLeastOneLinkInBerlin;
+        private Id<Link> lastLinkId;
+        private boolean lastLinkInBerlin;
         /**
          * A trip is completed after an activity has started which does not belong to the interaction activities
          */
         private boolean completed = false;
 
-        private TripData(Id<Person> personId, int tripNumber) {
+        private TripData(Id<Person> personId, int tripNumber, Id<Link> startLinkId, boolean startLinkInBerlin) {
             this.personId = personId;
             this.tripNumber = tripNumber;
+            this.startLinkId = startLinkId;
+            this.startLinkInBerlin = startLinkInBerlin;
+            this.atLeastOneLinkInBerlin = startLinkInBerlin;
+            this.lastLinkId = startLinkId;
+            this.lastLinkInBerlin = startLinkInBerlin;
+        }
+
+        private void complete(Id<Link> lastLinkId, boolean lastLinkInBerlin) {
+            this.lastLinkId = lastLinkId;
+            this.lastLinkInBerlin = lastLinkInBerlin;
+            this.completed = true;
         }
 
         public String getCsvRow() {
-            TrafficKind trafficKind = TrafficKind.fromValues(startLinkInBerlin, atLeastOneLinkInBerlin, lastLinkInBerlin);
+            TrafficKind trafficKind = TrafficKind.fromValues(startLinkInBerlin, atLeastOneLinkInBerlin,
+                    lastLinkInBerlin);
             String trafficKindValue;
             if (trafficKind == null) {
                 trafficKindValue = null;
             } else {
-                trafficKindValue = trafficKind.toString().toLowerCase();
+                trafficKindValue = trafficKind.value;
             }
             return String.format("%s;%s;%s_%s;%s;%s;%s", personId, tripNumber, personId, tripNumber,
                     startLinkId, lastLinkId, trafficKindValue);
@@ -91,7 +123,7 @@ public class TripTrafficKindAnalysis {
     }
 
     private static class EventHandler implements
-            PersonEntersVehicleEventHandler, LinkLeaveEventHandler, LinkEnterEventHandler, PersonLeavesVehicleEventHandler, ActivityStartEventHandler {
+            ActivityEndEventHandler, PersonEntersVehicleEventHandler, LinkEnterEventHandler, PersonLeavesVehicleEventHandler, ActivityStartEventHandler {
 
         private final Map<Id<Link>, AreaKind> areaKindByLink;
         private final Map<Id<Vehicle>, Map<Id<Person>, TripData>> tripsByVehiclesInTraffic = new HashMap<>();
@@ -114,35 +146,28 @@ public class TripTrafficKindAnalysis {
         }
 
         @Override
-        public void handleEvent(PersonEntersVehicleEvent event) {
+        public void handleEvent(ActivityEndEvent event) {
             Id<Person> personId = event.getPersonId();
+            Id<Link> linkId = event.getLinkId();
             List<TripData> tripsOfPerson = tripsByPerson.computeIfAbsent(personId, p -> new ArrayList<>());
-            TripData trip = getIncompleteTrip(tripsOfPerson)
-                    .orElseGet(() -> {
-                        int tripNumber = tripsOfPerson.size() + 1;
-                        TripData newTrip = new TripData(personId, tripNumber);
-                        tripsOfPerson.add(newTrip);
-                        return newTrip;
-                    });
-
-            Id<Vehicle> vehicleId = event.getVehicleId();
-            tripsByVehiclesInTraffic.computeIfAbsent(vehicleId, v -> new HashMap<>()).put(personId, trip);
+            Optional<TripData> incompleteTrip = getIncompleteTrip(tripsOfPerson);
+            if (incompleteTrip.isEmpty()) {
+                int tripNumber = tripsOfPerson.size() + 1;
+                boolean startLinkInBerlin = areaKindByLink.get(linkId).isInBerlin();
+                TripData newTrip = new TripData(personId, tripNumber, linkId, startLinkInBerlin);
+                tripsOfPerson.add(newTrip);
+            }
         }
 
         @Override
-        public void handleEvent(LinkLeaveEvent event) {
-            Id<Link> linkId = event.getLinkId();
-            AreaKind areaKind = areaKindByLink.get(linkId);
-            for (TripData tripData : tripsByVehiclesInTraffic.get(event.getVehicleId()).values()) {
-                if (tripData.startLinkId == null) {
-                    tripData.startLinkId = linkId;
-                    tripData.startLinkInBerlin = areaKind.isInBerlin();
-
-                }
-                tripData.atLeastOneLinkInBerlin |= areaKind.isInBerlin();
-                tripData.lastLinkId = linkId;
-                tripData.lastLinkInBerlin = areaKind.isInBerlin();
-            }
+        public void handleEvent(PersonEntersVehicleEvent event) {
+            Id<Person> personId = event.getPersonId();
+            Id<Vehicle> vehicleId = event.getVehicleId();
+            List<TripData> tripsOfPerson = tripsByPerson.computeIfAbsent(personId, p -> new ArrayList<>());
+            Map<Id<Person>, TripData> tripsOfVehicle = tripsByVehiclesInTraffic.computeIfAbsent(vehicleId,
+                    v -> new HashMap<>());
+            Optional<TripData> trip = getIncompleteTrip(tripsOfPerson);
+            trip.ifPresent(tripData -> tripsOfVehicle.put(personId, tripData));
         }
 
         @Override
@@ -166,14 +191,16 @@ public class TripTrafficKindAnalysis {
             if (!TripStructureUtils.isStageActivityType(event.getActType())) {
                 List<TripData> tripsOfPerson = tripsByPerson.get(event.getPersonId());
                 if (tripsOfPerson != null) {
+                    Id<Link> linkId = event.getLinkId();
+                    AreaKind areaKind = areaKindByLink.get(linkId);
                     TripData lastTripOfPerson = Iterables.getLast(tripsOfPerson);
-                    lastTripOfPerson.completed = true;
+                    lastTripOfPerson.complete(linkId, areaKind.isInBerlin());
                 }
             }
         }
 
         public void writeCsv(Writer writer) throws IOException {
-            writer.write("person;trip_number;trip_id;start_link;end_link;traffic_kind" + System.lineSeparator());
+            writer.write("person;trip_number;trip_id;start_link;end_link;berlinwise" + System.lineSeparator());
             Iterable<TripData> trips = tripsByPerson.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .flatMap(entry -> entry.getValue().stream())
@@ -208,11 +235,12 @@ public class TripTrafficKindAnalysis {
         eventsManager.addHandler(eventHandler);
 
         EventsUtils.readEvents(eventsManager, eventsPath.toString());
-        Path csvPath = scenarioPath.resolve("analysis").resolve(String.format("%s.trips_traffic_kind.csv", scenario));
-        boolean analysisDirectoryCreated = csvPath.toFile().mkdirs();
+        Path analysisPath = scenarioPath.resolve("analysis");
+        boolean analysisDirectoryCreated = analysisPath.toFile().mkdirs();
         if (analysisDirectoryCreated) {
             log.info(String.format("Directory %s created", scenarioPath));
         }
+        Path csvPath = analysisPath.resolve(String.format("%s.trips_berlinwise.csv", scenario));
         try (Writer writer = new FileWriter(csvPath.toFile())) {
             eventHandler.writeCsv(writer);
         }
@@ -221,10 +249,17 @@ public class TripTrafficKindAnalysis {
     /**
      * Run this with:
      * 1. The path to the scenarios directory
-     * 2. The name of the scenario you want to check
+     * 2. Either the name of a single scenario you want to check, or "all" for all scenarios
      */
     public static void main(String[] args) throws IOException {
-        runAnalysis(Path.of(args[0]), args[1]);
+        if (args[1].equals("all")) {
+            for (BerlinScenario scenario : BerlinScenario.values()) {
+                System.out.printf("Running on %s%n", scenario.getScenarioName());
+                runAnalysis(Path.of(args[0]), scenario.getScenarioName());
+            }
+        } else {
+            runAnalysis(Path.of(args[0]), args[1]);
+        }
     }
 
 }
