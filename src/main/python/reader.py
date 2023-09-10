@@ -47,6 +47,7 @@ def read_trips_berlinwise(trips_berlinwise_path: Path) -> pd.DataFrame:
             "trip_id": str,
             "person": str,
             "trip_number": np.int8,
+            "modes": "category",
             "start_link": "category",
             "end_link": "category",
             "berlinwise": "category",

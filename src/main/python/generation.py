@@ -1,6 +1,8 @@
+import functools
 from dataclasses import dataclass
 from typing import Dict
 
+import numpy as np
 import pandas as pd
 
 from scenarios import BerlinScenario
@@ -30,8 +32,26 @@ def generate_agents_subpopulations(
     )
 
 
+def add_person_and_trip_number_from_trip_id(data: pd.DataFrame):
+    data.insert(
+        0,
+        "person",
+        data.index.map(lambda trip_id: trip_id.rsplit("_", 1)[0]).astype("category"),
+    )
+    data.insert(
+        1,
+        "trip_number",
+        data.index.map(lambda trip_id: np.int8(trip_id.rsplit("_", 1)[1])),
+    )
+
+
 def berlinwise_col(scenario: BerlinScenario) -> str:
     return f"{scenario.value}.berlinwise"
+
+
+BERLINWISE_CAT = pd.CategoricalDtype(
+    ["berlin_orig", "berlin_dest", "berlin_inner", "non_berlin", "cancelled"]
+)
 
 
 def to_berlinwise(berlinwise):
@@ -45,21 +65,23 @@ def generate_trips_berlinwise(
     agents: pd.DataFrame,
     trips_berlinwise_by_scenario: Dict[BerlinScenario, pd.DataFrame],
 ) -> pd.DataFrame:
-    trips_berlinwise = trips_berlinwise_by_scenario[BerlinScenario.BASE][
-        ["person", "trip_number"]
-    ]
+    trips_berlinwise = trips_berlinwise_by_scenario[BerlinScenario.BASE][[]]
     for scenario, trips_berlinwise_of_scenario in trips_berlinwise_by_scenario.items():
         trips_berlinwise_of_scenario = (
             trips_berlinwise_of_scenario["berlinwise"]
             .rename(berlinwise_col(scenario))
             .map(to_berlinwise)
+            .astype(BERLINWISE_CAT)
         )
         trips_berlinwise = trips_berlinwise.join(
-            trips_berlinwise_of_scenario, "trip_id", "outer"
+            trips_berlinwise_of_scenario, how="outer"
         )
     # fill NaNs in a second pass, as the outer join could add NaNs after each scenario
     for scenario in trips_berlinwise_by_scenario.keys():
         trips_berlinwise[berlinwise_col(scenario)].fillna("cancelled", inplace=True)
+    # As an outer join is used, I could not find an option for "take person from whatever data frame where it exists",
+    # so recreate person and trip_number columns
+    add_person_and_trip_number_from_trip_id(trips_berlinwise)
     return trips_berlinwise.join(agents[[]], "person", "inner")
 
 
@@ -67,47 +89,63 @@ def berlin_transit_col(scenario: BerlinScenario) -> str:
     return f"{scenario.value}.berlin_transit"
 
 
+modes = ["freight", "pt", "car", "ride", "bicycle", "walk"]
+
+
+BERLIN_TRANSIT_CAT = pd.CategoricalDtype(
+    [f"transit_{mode}" for mode in modes]
+    + [
+        "other",
+        "berlin",
+        "cancelled",
+    ]
+)
+
+
 def to_berlin_transit(row):
     if row["berlinwise"] == "berlin_transit":
-        return f"transit_{row['main_mode']}"
+        for mode in modes:
+            if mode in row["modes"]:
+                return f"transit_{mode}"
+        raise NotImplementedError
     elif row["berlinwise"] == "non_berlin":
         return "other"
     else:
         return "berlin"
 
 
-def is_in_all_scenarios_berlin(row):
-    return all(
-        row[berlin_transit_col(scenario)] == "berlin" for scenario in BerlinScenario
+def is_in_all_scenarios_berlin(trips):
+    return functools.reduce(
+        lambda a, b: a & b,
+        (
+            trips[berlin_transit_col(scenario)] == "berlin"
+            for scenario in BerlinScenario
+        ),
     )
 
 
 def generate_nonberlin_trips(
     agents: pd.DataFrame,
-    trips_by_scenario: Dict[BerlinScenario, pd.DataFrame],
     trips_berlinwise_by_scenario: Dict[BerlinScenario, pd.DataFrame],
 ) -> pd.DataFrame:
-    nonberlin_trips = trips_berlinwise_by_scenario[BerlinScenario.BASE][
-        ["person", "trip_number"]
-    ]
+    nonberlin_trips = trips_berlinwise_by_scenario[BerlinScenario.BASE][[]]
     for (
         scenario,
-        trips_of_scenario,
-    ) in trips_by_scenario.items():
-        trips_berlinwise_of_scenario = trips_berlinwise_by_scenario[scenario]
-        trips = trips_of_scenario[["main_mode"]].join(
-            trips_berlinwise_of_scenario[["berlinwise"]], "trip_id"
+        trips_berlinwise_of_scenario,
+    ) in trips_berlinwise_by_scenario.items():
+        trips_berlin_transit = (
+            trips_berlinwise_of_scenario.apply(to_berlin_transit, axis=1)
+            .rename(berlin_transit_col(scenario))
+            .astype(BERLIN_TRANSIT_CAT)
         )
-        trips_berlin_transit = trips.apply(to_berlin_transit, axis=1).rename(
-            berlin_transit_col(scenario)
-        )
-        nonberlin_trips = nonberlin_trips.join(trips_berlin_transit, "trip_id", "outer")
-    nonberlin_trips = nonberlin_trips[
-        ~nonberlin_trips.apply(is_in_all_scenarios_berlin, axis=1)
-    ]
+        nonberlin_trips = nonberlin_trips.join(trips_berlin_transit, how="outer")
+    nonberlin_trips = nonberlin_trips[~is_in_all_scenarios_berlin(nonberlin_trips)]
     # fill NaNs in a second pass, as the outer join could add NaNs after each scenario
-    for scenario in trips_by_scenario.keys():
+    for scenario in trips_berlinwise_by_scenario.keys():
         nonberlin_trips[berlin_transit_col(scenario)].fillna("cancelled", inplace=True)
+    # As an outer join is used, I could not find an option for "take person from whatever data frame where it exists",
+    # so recreate person and trip_number columns
+    add_person_and_trip_number_from_trip_id(nonberlin_trips)
     return nonberlin_trips.join(agents[[]], "person", "inner")
 
 

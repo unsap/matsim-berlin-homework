@@ -16,11 +16,13 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.events.ActivityEndEvent;
 import org.matsim.api.core.v01.events.ActivityStartEvent;
 import org.matsim.api.core.v01.events.LinkEnterEvent;
+import org.matsim.api.core.v01.events.PersonDepartureEvent;
 import org.matsim.api.core.v01.events.PersonEntersVehicleEvent;
 import org.matsim.api.core.v01.events.PersonLeavesVehicleEvent;
 import org.matsim.api.core.v01.events.handler.ActivityEndEventHandler;
 import org.matsim.api.core.v01.events.handler.ActivityStartEventHandler;
 import org.matsim.api.core.v01.events.handler.LinkEnterEventHandler;
+import org.matsim.api.core.v01.events.handler.PersonDepartureEventHandler;
 import org.matsim.api.core.v01.events.handler.PersonEntersVehicleEventHandler;
 import org.matsim.api.core.v01.events.handler.PersonLeavesVehicleEventHandler;
 import org.matsim.api.core.v01.network.Link;
@@ -36,9 +38,9 @@ import org.matsim.vehicles.Vehicle;
 
 import com.google.common.collect.Iterables;
 
-public class TripTrafficKindAnalysis {
+public class TripBerlinwiseAnalysis {
 
-    private final static Logger log = Logger.getLogger(TripTrafficKindAnalysis.class);
+    private final static Logger log = Logger.getLogger(TripBerlinwiseAnalysis.class);
 
     private enum TrafficKind {
 
@@ -80,6 +82,7 @@ public class TripTrafficKindAnalysis {
 
         private final Id<Person> personId;
         private final int tripNumber;
+        private final List<String> modes = new ArrayList<>();
 
         private final Id<Link> startLinkId;
         private final boolean startLinkInBerlin;
@@ -116,14 +119,14 @@ public class TripTrafficKindAnalysis {
             } else {
                 trafficKindValue = trafficKind.value;
             }
-            return String.format("%s;%s;%s_%s;%s;%s;%s", personId, tripNumber, personId, tripNumber,
-                    startLinkId, lastLinkId, trafficKindValue);
+            return String.format("%s;%s;%s_%s;%s;%s;%s;%s", personId, tripNumber, personId, tripNumber,
+                    String.join("-", modes), startLinkId, lastLinkId, trafficKindValue);
         }
 
     }
 
     private static class EventHandler implements
-            ActivityEndEventHandler, PersonEntersVehicleEventHandler, LinkEnterEventHandler, PersonLeavesVehicleEventHandler, ActivityStartEventHandler {
+            ActivityEndEventHandler, PersonDepartureEventHandler, PersonEntersVehicleEventHandler, LinkEnterEventHandler, PersonLeavesVehicleEventHandler, ActivityStartEventHandler {
 
         private final Map<Id<Link>, AreaKind> areaKindByLink;
         private final Map<Id<Vehicle>, Map<Id<Person>, TripData>> tripsByVehiclesInTraffic = new HashMap<>();
@@ -156,6 +159,15 @@ public class TripTrafficKindAnalysis {
                 boolean startLinkInBerlin = areaKindByLink.get(linkId).isInBerlin();
                 TripData newTrip = new TripData(personId, tripNumber, linkId, startLinkInBerlin);
                 tripsOfPerson.add(newTrip);
+            }
+        }
+
+        @Override
+        public void handleEvent(PersonDepartureEvent event) {
+            List<TripData> tripsOfPerson = tripsByPerson.get(event.getPersonId());
+            if (tripsOfPerson != null) {
+                TripData trip = Iterables.getLast(tripsOfPerson);
+                trip.modes.add(event.getLegMode());
             }
         }
 
@@ -200,7 +212,7 @@ public class TripTrafficKindAnalysis {
         }
 
         public void writeCsv(Writer writer) throws IOException {
-            writer.write("person;trip_number;trip_id;start_link;end_link;berlinwise" + System.lineSeparator());
+            writer.write("person;trip_number;trip_id;modes;start_link;end_link;berlinwise" + System.lineSeparator());
             Iterable<TripData> trips = tripsByPerson.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .flatMap(entry -> entry.getValue().stream())
