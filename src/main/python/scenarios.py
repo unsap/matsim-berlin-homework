@@ -13,5 +13,8 @@ class BerlinScenario(Enum):
     S2 = "7.S2"
     S3 = "8.S3"
 
+    def __str__(self) -> str:
+        return self.value[2:]
+
 
 SCENARIOS_PATH = Path(__file__).parents[3] / "scenarios"

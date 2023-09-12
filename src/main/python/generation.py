@@ -46,7 +46,7 @@ def add_person_and_trip_number_from_trip_id(data: pd.DataFrame):
 
 
 def berlinwise_col(scenario: BerlinScenario) -> str:
-    return f"{scenario.value}.berlinwise"
+    return f"{scenario}.berlinwise"
 
 
 BERLINWISE_CAT = pd.CategoricalDtype(
@@ -86,7 +86,7 @@ def generate_trips_berlinwise(
 
 
 def berlin_transit_col(scenario: BerlinScenario) -> str:
-    return f"{scenario.value}.berlin_transit"
+    return f"{scenario}.berlin_transit"
 
 
 modes = ["freight", "pt", "car", "ride", "bicycle", "walk"]
@@ -158,9 +158,12 @@ def at_least_one_berlin_start_or_end(berlinwise):
 def generate_agents_berlin_trips(
     agents: pd.DataFrame, trips_berlinwise: pd.DataFrame
 ) -> pd.DataFrame:
-    at_least_one_berlin_trip_by_person = trips_berlinwise.groupby("person")[
-        "berlinwise"
-    ].agg(at_least_one_berlin_trip=at_least_one_berlin_start_or_end)
-    joined_agents = agents.join(at_least_one_berlin_trip_by_person, "person")
-    joined_agents["at_least_one_berlin_trip"].fillna(False, inplace=True)
+    berlin_trips = trips_berlinwise.groupby("person")["berlinwise"].agg(
+        berlin_trip=at_least_one_berlin_start_or_end
+    )
+    joined_agents = agents.join(berlin_trips, "person")
+    joined_agents["berlin_trip"].fillna(False, inplace=True)
+    joined_agents["berlin_trip"] = joined_agents["berlin_trip"].map(
+        lambda berlin_trip: "yes" if berlin_trip else "no"
+    )
     return joined_agents
