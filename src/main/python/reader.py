@@ -45,11 +45,31 @@ def read_trips_berlinwise(trips_berlinwise_path: Path) -> pd.DataFrame:
         index_col="trip_id",
         dtype={
             "trip_id": str,
-            "person": str,
+            "person": "category",
             "trip_number": np.int8,
             "modes": "category",
             "start_link": "category",
             "end_link": "category",
-            "berlinwise": "category",
+            "start_area": "category",
+            "visited_areas": "category",
+            "end_area": "category",
+        },
+    )
+
+
+def read_trips_additional(trips_additional_path: Path) -> pd.DataFrame:
+    return pd.read_csv(
+        trips_additional_path,
+        sep=";",
+        index_col="trip_id",
+        dtype={
+            "trip_id": str,
+            "person": "category",
+            "trip_number": np.int8,
+            "modes": "category",
+            "last_link": "category",
+            "last_area": "category",
+            "completed": bool,
+            "visited_link_count": np.int32,
         },
     )

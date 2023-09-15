@@ -15,14 +15,10 @@ class AgentSubpopulations:
     relevant: pd.DataFrame
 
 
-def generate_agents_subpopulations(
-    agents: pd.DataFrame, trips: pd.DataFrame
-) -> AgentSubpopulations:
+def generate_agents_subpopulations(agents: pd.DataFrame, trips: pd.DataFrame) -> AgentSubpopulations:
     main_modes_by_agent = trips.groupby("person")["main_mode"].agg(main_modes=set)
     joined_agents = agents.join(main_modes_by_agent, "person", "outer")
-    joined_agents["main_modes"] = joined_agents["main_modes"].map(
-        lambda modes: modes if type(modes) == set else set()
-    )
+    joined_agents["main_modes"] = joined_agents["main_modes"].map(lambda modes: modes if type(modes) == set else set())
     excluded_freight = joined_agents["subpopulation"] == "freight"
     excluded_ride = joined_agents["main_modes"].map(lambda modes: "ride" in modes)
     return AgentSubpopulations(
@@ -49,16 +45,29 @@ def berlinwise_col(scenario: BerlinScenario) -> str:
     return f"{scenario}.berlinwise"
 
 
+BERLIN_AREAS = {"berlin_umweltzone", "berlin_outside_umweltzone"}
 BERLINWISE_CAT = pd.CategoricalDtype(
-    ["berlin_orig", "berlin_dest", "berlin_inner", "non_berlin", "cancelled"]
+    [
+        "berlin_orig",
+        "berlin_dest",
+        "berlin_inner",
+        "non_berlin",
+        "cancelled",
+    ]
 )
 
 
-def to_berlinwise(berlinwise):
-    if berlinwise == "berlin_transit":
-        return "non_berlin"
+def to_berlinwise(row):
+    if row["start_area"] in BERLIN_AREAS:
+        if row["end_area"] in BERLIN_AREAS:
+            return "berlin_inner"
+        else:
+            return "berlin_orig"
     else:
-        return berlinwise
+        if row["end_area"] in BERLIN_AREAS:
+            return "berlin_dest"
+        else:
+            return "non_berlin"
 
 
 def generate_trips_berlinwise(
@@ -68,14 +77,11 @@ def generate_trips_berlinwise(
     trips_berlinwise = trips_berlinwise_by_scenario[BerlinScenario.BASE][[]]
     for scenario, trips_berlinwise_of_scenario in trips_berlinwise_by_scenario.items():
         trips_berlinwise_of_scenario = (
-            trips_berlinwise_of_scenario["berlinwise"]
-            .rename(berlinwise_col(scenario))
-            .map(to_berlinwise)
+            trips_berlinwise_of_scenario.apply(to_berlinwise, axis=1)
             .astype(BERLINWISE_CAT)
+            .rename(berlinwise_col(scenario))
         )
-        trips_berlinwise = trips_berlinwise.join(
-            trips_berlinwise_of_scenario, how="outer"
-        )
+        trips_berlinwise = trips_berlinwise.join(trips_berlinwise_of_scenario, how="outer")
     # fill NaNs in a second pass, as the outer join could add NaNs after each scenario
     for scenario in trips_berlinwise_by_scenario.keys():
         trips_berlinwise[berlinwise_col(scenario)].fillna("cancelled", inplace=True)
@@ -103,24 +109,25 @@ BERLIN_TRANSIT_CAT = pd.CategoricalDtype(
 
 
 def to_berlin_transit(row):
-    if row["berlinwise"] == "berlin_transit":
-        for mode in modes:
-            if mode in row["modes"]:
-                return f"transit_{mode}"
-        raise NotImplementedError
-    elif row["berlinwise"] == "non_berlin":
-        return "other"
-    else:
+    if row["start_area"] in BERLIN_AREAS:
         return "berlin"
+    else:
+        if row["end_area"] in BERLIN_AREAS:
+            return "berlin"
+        else:
+            if "berlin" in row["visited_areas"]:
+                for mode in modes:
+                    if mode in row["modes"]:
+                        return f"transit_{mode}"
+                raise NotImplementedError
+            else:
+                return "other"
 
 
 def is_in_all_scenarios_berlin(trips):
     return functools.reduce(
         lambda a, b: a & b,
-        (
-            trips[berlin_transit_col(scenario)] == "berlin"
-            for scenario in BerlinScenario
-        ),
+        (trips[berlin_transit_col(scenario)] == "berlin" for scenario in BerlinScenario),
     )
 
 
@@ -150,20 +157,14 @@ def generate_nonberlin_trips(
 
 
 def at_least_one_berlin_start_or_end(berlinwise):
-    return any(
-        value in {"berlin_orig", "berlin_dest", "berlin_inner"} for value in berlinwise
-    )
+    return any(value in {"berlin_orig", "berlin_dest", "berlin_inner"} for value in berlinwise)
 
 
-def generate_agents_berlin_trips(
-    agents: pd.DataFrame, trips_berlinwise: pd.DataFrame
-) -> pd.DataFrame:
-    berlin_trips = trips_berlinwise.groupby("person")["berlinwise"].agg(
+def generate_agents_berlin_trips(agents: pd.DataFrame, trips_berlinwise: pd.DataFrame) -> pd.DataFrame:
+    berlin_trips = trips_berlinwise.groupby("person")[berlinwise_col(BerlinScenario.BASE)].agg(
         berlin_trip=at_least_one_berlin_start_or_end
     )
     joined_agents = agents.join(berlin_trips, "person")
     joined_agents["berlin_trip"].fillna(False, inplace=True)
-    joined_agents["berlin_trip"] = joined_agents["berlin_trip"].map(
-        lambda berlin_trip: "yes" if berlin_trip else "no"
-    )
+    joined_agents["berlin_trip"] = joined_agents["berlin_trip"].map(lambda berlin_trip: "yes" if berlin_trip else "no")
     return joined_agents

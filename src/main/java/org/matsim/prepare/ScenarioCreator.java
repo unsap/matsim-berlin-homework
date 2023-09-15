@@ -1,5 +1,15 @@
 package org.matsim.prepare;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
 import org.apache.log4j.Logger;
 import org.geotools.data.shapefile.files.ShpFiles;
 import org.geotools.data.shapefile.shp.ShapefileReader;
@@ -22,16 +32,6 @@ import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.operation.MathTransform;
 import org.opengis.referencing.operation.TransformException;
-
-import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 public class ScenarioCreator {
 
@@ -76,8 +76,10 @@ public class ScenarioCreator {
         SIDE_STREET,
         OTHER_STREET;
 
-        private static final Set<String> ROAD_TYPES_MAIN_STREETS = Set.of("primary", "primary_link", "secondary", "secondary_link", "tertiary");
-        private static final Set<String> ROAD_TYPES_SIDE_STREETS = Set.of("residential", "living_street", "unclassified");
+        private static final Set<String> ROAD_TYPES_MAIN_STREETS = Set.of("primary", "primary_link", "secondary",
+                "secondary_link", "tertiary");
+        private static final Set<String> ROAD_TYPES_SIDE_STREETS = Set.of("residential", "living_street",
+                "unclassified");
 
         public static RoadKind fromValue(String value) {
             if (value == null) {
@@ -90,7 +92,6 @@ public class ScenarioCreator {
                 return OTHER_STREET;
             }
         }
-
 
     }
 
@@ -149,7 +150,6 @@ public class ScenarioCreator {
 
     /**
      * Inspects which nodes are in Berlin
-     *
      * @return Map which describes for each node whether it is in Berlin
      */
     public static Map<Id<Node>, AreaKind> inspectNodes(Network network, GeometryFactory geometryFactory,
@@ -176,7 +176,6 @@ public class ScenarioCreator {
 
     /**
      * Inspects links respective whether they are in Berlin, they are in the matching subnetwork and their road kind
-     *
      * @return Links with additional data
      */
     private List<LinkData> inspectLinks(Network network) {
@@ -193,7 +192,6 @@ public class ScenarioCreator {
      * Clones the original network so its links can be manipulated independently.
      * This is much faster than rereading through I/O.
      * The nodes are reused as those are not modified.
-     *
      * @return Network with cloned links
      */
     private Network createNetworkClone() {
@@ -202,7 +200,8 @@ public class ScenarioCreator {
             network.addNode(node);
         }
         for (Link originalLink : originalNetwork.getLinks().values()) {
-            Link link = network.getFactory().createLink(originalLink.getId(), originalLink.getFromNode(), originalLink.getToNode());
+            Link link = network.getFactory().createLink(originalLink.getId(), originalLink.getFromNode(),
+                    originalLink.getToNode());
             link.setLength(originalLink.getLength());
             link.setFreespeed(originalLink.getFreespeed());
             link.setCapacity(originalLink.getCapacity());
@@ -218,8 +217,7 @@ public class ScenarioCreator {
 
     /**
      * Creates a scenario and saves its files into a folder
-     *
-     * @param scenario  Unique name for the scenario
+     * @param scenario Unique name for the scenario
      * @param modifiers Modifiers for the network
      */
     public void createScenario(String scenario, List<Consumer<LinkData>> modifiers) {
@@ -237,7 +235,6 @@ public class ScenarioCreator {
 
     /**
      * Creates a modified config for a scenario
-     *
      * @return modified config which is suitable for the scenario
      */
     private Config createModifiedConfig(Path createdNetworkPath) {
@@ -247,7 +244,8 @@ public class ScenarioCreator {
         config.controler().setOutputDirectory(Paths.get("output").toString());
         config.network().setInputFile(createdNetworkPath.getFileName().toString());
         config.plans().setInputFile(relativePath.resolve(originalConfig.plans().getInputFile()).toString());
-        config.transit().setTransitScheduleFile(relativePath.resolve(originalConfig.transit().getTransitScheduleFile()).toString());
+        config.transit().setTransitScheduleFile(
+                relativePath.resolve(originalConfig.transit().getTransitScheduleFile()).toString());
         config.transit().setVehiclesFile(relativePath.resolve(originalConfig.transit().getVehiclesFile()).toString());
         config.vehicles().setVehiclesFile(relativePath.resolve(originalConfig.vehicles().getVehiclesFile()).toString());
         return config;
@@ -255,7 +253,6 @@ public class ScenarioCreator {
 
     /**
      * Creates a modified network
-     *
      * @return Freshly created network with the modifiers applied
      */
     private Network createModifiedNetwork(List<Consumer<LinkData>> modifiers) {
@@ -356,26 +353,32 @@ public class ScenarioCreator {
         Path inputPath = Paths.get("scenarios", "berlin-v5.5-10pct", "input");
         Path configPath = inputPath.resolve("berlin-v5.5-10pct.config.xml");
         MultiPolygon berlinShape = readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("berlin.dbf"));
-        MultiPolygon berlinUmweltzoneShape = transformShape(readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("Umweltzone_Berlin.dbf")), "EPSG:25833");
+        MultiPolygon berlinUmweltzoneShape = transformShape(
+                readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("Umweltzone_Berlin.dbf")),
+                "EPSG:25833");
 
         var scenarioCreator = new ScenarioCreator(geometryFactory, berlinShape, berlinUmweltzoneShape, configPath);
         // create base scenario (a new network file will be created because they have additional attributes)
-        scenarioCreator.createScenario(BerlinScenario.BASE.getScenarioName(), List.of());
+        scenarioCreator.createScenario(BerlinScenario.BASE.getDirectoryName(), List.of());
         // create scenarios with a single measure
-        scenarioCreator.createScenario(BerlinScenario.GR_HS.getScenarioName(), List.of(ScenarioCreator::reduceFreespeedOnMainStreets));
-        scenarioCreator.createScenario(BerlinScenario.GR_WS.getScenarioName(), List.of(ScenarioCreator::reduceFreespeedOnSideStreets));
-        scenarioCreator.createScenario(BerlinScenario.KR_HS.getScenarioName(), List.of(ScenarioCreator::reduceCapacityOnMainStreets));
-        scenarioCreator.createScenario(BerlinScenario.KB.getScenarioName(), List.of(ScenarioCreator::kiezblocksOnlyInUmweltzone));
-        scenarioCreator.createScenario(BerlinScenario.MV.getScenarioName(), List.of(ScenarioCreator::carBan));
+        scenarioCreator.createScenario(BerlinScenario.GR_HS.getDirectoryName(),
+                List.of(ScenarioCreator::reduceFreespeedOnMainStreets));
+        scenarioCreator.createScenario(BerlinScenario.GR_WS.getDirectoryName(),
+                List.of(ScenarioCreator::reduceFreespeedOnSideStreets));
+        scenarioCreator.createScenario(BerlinScenario.KR_HS.getDirectoryName(),
+                List.of(ScenarioCreator::reduceCapacityOnMainStreets));
+        scenarioCreator.createScenario(BerlinScenario.KB.getDirectoryName(),
+                List.of(ScenarioCreator::kiezblocksOnlyInUmweltzone));
+        scenarioCreator.createScenario(BerlinScenario.MV.getDirectoryName(), List.of(ScenarioCreator::carBan));
         // create stacked scenarios
-        scenarioCreator.createScenario(BerlinScenario.S1.getScenarioName(), List.of(
+        scenarioCreator.createScenario(BerlinScenario.S1.getDirectoryName(), List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets));
-        scenarioCreator.createScenario(BerlinScenario.S2.getScenarioName(), List.of(
+        scenarioCreator.createScenario(BerlinScenario.S2.getDirectoryName(), List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets,
                 ScenarioCreator::reduceCapacityOnMainStreets));
-        scenarioCreator.createScenario(BerlinScenario.S3.getScenarioName(), List.of(
+        scenarioCreator.createScenario(BerlinScenario.S3.getDirectoryName(), List.of(
                 ScenarioCreator::reduceFreespeedOnMainStreets,
                 ScenarioCreator::reduceFreespeedOnSideStreets,
                 ScenarioCreator::reduceCapacityOnMainStreets,

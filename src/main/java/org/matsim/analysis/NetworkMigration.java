@@ -1,5 +1,14 @@
 package org.matsim.analysis;
 
+import static org.matsim.prepare.ScenarioCreator.AreaKind;
+import static org.matsim.prepare.ScenarioCreator.inspectNodes;
+import static org.matsim.prepare.ScenarioCreator.readShape;
+import static org.matsim.prepare.ScenarioCreator.transformShape;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Map;
+
 import org.apache.log4j.Logger;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.MultiPolygon;
@@ -13,12 +22,6 @@ import org.matsim.prepare.ScenarioCreator;
 import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.operation.TransformException;
 
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.Map;
-
-import static org.matsim.prepare.ScenarioCreator.*;
-
 public class NetworkMigration {
 
     private final static Logger log = Logger.getLogger(NetworkMigration.class);
@@ -27,21 +30,27 @@ public class NetworkMigration {
         GeometryFactory geometryFactory = new GeometryFactory();
         Path inputPath = scenariosPath.resolve("berlin-v5.5-10pct").resolve("input");
         MultiPolygon berlinShape = readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("berlin.dbf"));
-        MultiPolygon berlinUmweltzoneShape = transformShape(readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("Umweltzone_Berlin.dbf")), "EPSG:25833");
+        MultiPolygon berlinUmweltzoneShape = transformShape(
+                readShape(geometryFactory, inputPath.resolve("berlin-shp").resolve("Umweltzone_Berlin.dbf")),
+                "EPSG:25833");
 
         Path originalNetworkPath = inputPath.resolve("berlin-v5.5-network.xml.gz");
         Network originalNetwork = NetworkUtils.readNetwork(originalNetworkPath.toString());
-        Map<Id<Node>, ScenarioCreator.AreaKind> areaKindByNode = inspectNodes(originalNetwork, geometryFactory, berlinShape, berlinUmweltzoneShape);
+        Map<Id<Node>, ScenarioCreator.AreaKind> areaKindByNode = inspectNodes(originalNetwork, geometryFactory,
+                berlinShape, berlinUmweltzoneShape);
 
         for (BerlinScenario scenario : BerlinScenario.values()) {
-            migrate(areaKindByNode, scenariosPath, scenario.getScenarioName());
+            migrate(areaKindByNode, scenariosPath, scenario);
         }
     }
 
-    public static void migrate(Map<Id<Node>, AreaKind> areaKindByNode, Path scenariosPath, String scenario) {
-        log.info(String.format("Migrating %s", scenario));
-        migrateNetwork(areaKindByNode, scenariosPath.resolve(scenario).resolve("input").resolve(String.format("%s.network.xml.gz", scenario)));
-        migrateNetwork(areaKindByNode, scenariosPath.resolve(scenario).resolve("output").resolve(String.format("%s.output_network.xml.gz", scenario)));
+    public static void migrate(Map<Id<Node>, AreaKind> areaKindByNode, Path scenariosPath, BerlinScenario scenario) {
+        log.info(String.format("Migrating %s", scenario.getDirectoryName()));
+        Path scenarioPath = scenariosPath.resolve(scenario.getDirectoryName());
+        migrateNetwork(areaKindByNode,
+                scenarioPath.resolve("input").resolve(String.format("%s.network.xml.gz", scenario.getFilePrefix())));
+        migrateNetwork(areaKindByNode, scenarioPath.resolve("output").resolve(
+                String.format("%s.output_network.xml.gz", scenario.getFilePrefix())));
     }
 
     private static void migrateNetwork(Map<Id<Node>, ScenarioCreator.AreaKind> areaKindByNode, Path networkPath) {
