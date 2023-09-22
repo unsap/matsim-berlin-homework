@@ -289,7 +289,7 @@ public class TripEventsAnalysis {
         if (analysisDirectoryCreated) {
             log.info(String.format("Directory %s created", scenarioPath));
         }
-        Path csvPath = analysisPath.resolve(String.format("%s.trips_additional.csv", scenario.getFilePrefix()));
+        Path csvPath = analysisPath.resolve(String.format("%s.trips_distances.csv", scenario.getFilePrefix()));
         try (Writer writer = new FileWriter(csvPath.toFile())) {
             eventHandler.writeCsv(writer);
         }
